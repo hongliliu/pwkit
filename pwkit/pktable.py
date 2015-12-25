@@ -868,3 +868,144 @@ class AvalColumn (PKTableAlgebraColumnABC):
 
     def __setitem__ (self, key, value):
         self._data[key] = value
+
+
+class indexerproperty_Helper (object):
+    def __init__ (self, instance, descriptor):
+        self._instance = instance
+        self._descriptor = descriptor
+
+    def __getitem__ (self, key):
+        return self._descriptor._getter (self._instance, key)
+
+    def __setitem__ (self, key, value):
+        if self._descriptor._setter is None:
+            raise TypeError ('item assignment is not allowed by this property')
+        return self._descriptor._setter (self._instance, key, value)
+
+    def __delitem__ (self, key):
+        if self._descriptor._deleter is None:
+            raise TypeError ('item deletion is not allowed by this property')
+        return self._descriptor._deleter (self._instance, key)
+
+
+class indexerproperty (object):
+    def __init__ (self, getter):
+        self._getter = getter
+        self._setter = None
+        self._deleter = None
+
+    def __get__ (self, instance, owner):
+        return indexerproperty_Helper (instance, self)
+
+    def setter (self, thesetter):
+        self._setter = thesetter
+        return self
+
+    def deleter (self, thedeleter):
+        self._deleter = thedeleter
+        return self
+
+
+class CoordColumn (PKTableColumnABC):
+    """astropy.coordinates.SkyCoord instances are not mutable, so we don't use
+    them for our data storage. However, we should ideally support different
+    coordinate frames, etc., in the same way that it does. For now I just have
+    hardcoded RA/Dec.
+
+    """
+    _data = None
+    "The actual data, stored as an (nrow,2) ndarray of RA and Dec in radians."
+
+    def __init__ (self, len, _data=None):
+        if _data is not None:
+            self._data = _data
+            return
+
+        try:
+            len = int (len)
+        except Exception:
+            raise ValueError ('CoordColumn length must be an integer')
+
+        self._data = np.empty ((len, 2))
+        self._data.fill (np.nan)
+
+
+    @classmethod
+    def _new_from_data (cls, data):
+        return cls (None, _data=data)
+
+
+    def __len__ (self):
+        return len (self._data)
+
+
+    def __iter__ (self):
+        return iter (self._data)
+
+
+    def _repr_single_item (self, idx):
+        ra, dec = self._data[idx]
+
+        if not np.isfinite (ra) or not np.isfinite (dec):
+            return '?'
+
+        from .astutil import fmtradec
+        return fmtradec (ra, dec)
+
+    # Basic indexing.
+
+    def _get_index (self, idx):
+        return self._data[idx]
+
+    def _set_index (self, idx, value):
+        self._data[idx] = value
+
+    def __getitem__ (self, key):
+        """Same line of reasoning as ScalarColumn."""
+        return self._data[key]
+
+    def __setitem__ (self, key, value):
+        self._data[key] = value
+
+    # Experiment with fancy "indexer properties"
+
+    @indexerproperty
+    def radec_rad (self, idx):
+        return self._data[idx]
+
+    @radec_rad.setter
+    def radec_rad (self, idx, value):
+        self._data[idx] = value
+
+    @radec_rad.deleter
+    def radec_rad (self, idx):
+        self._data[idx] = np.nan
+
+
+    @indexerproperty
+    def radec_deg (self, idx):
+        from .astutil import R2D
+        return self._data[idx] * R2D
+
+    @radec_deg.setter
+    def radec_deg (self, idx, value):
+        from .astutil import D2R
+        self._data[idx] = np.asarray (value) * D2R
+
+    @radec_deg.deleter
+    def radec_deg (self, idx):
+        self._data[idx] = np.nan
+
+
+    @indexerproperty
+    def formatted (self, idx):
+        # XXX need to handle non-scalar indices
+        return self._repr_single_item (idx)
+
+    @formatted.setter
+    def formatted (self, idx, value):
+        from astutil import parsehours, parsedeglat
+        # XXX super not robust!
+        rastr, decstr = value.split (None, 1)
+        self._data[idx] = (parsehours (rastr), parsedeglat (decstr))
