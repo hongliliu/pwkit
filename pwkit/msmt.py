@@ -27,11 +27,21 @@ class Domains (object):
 
     names = ['anything', 'nonnegative', 'nonpositive']
 
-    @classmethod
-    def check (cls, domain):
-        if not (domain >= cls.anything and domain <= cls.nonpositive):
-            raise ValueError ('illegal Uval domain %r' % domain)
-        return domain
+    @classmethod # for some reason @staticmethod isn't working?
+    def normalize (cls, domain):
+        """Return a verified, normalized domain. In particular we allow the string
+        representations to be used, which can be convenient for code calling
+        us from outside this module.
+
+        """
+        try:
+            dval = Domains.names.index (domain)
+        except ValueError:
+            dval = int (domain)
+
+        if not (dval >= cls.anything and dval <= cls.nonpositive):
+            raise ValueError ('illegal measurement domain %r' % domain)
+        return dval
 
     negate = [anything, nonpositive, nonnegative]
     add = {
@@ -175,7 +185,7 @@ class Aval (object):
     __slots__ = ('domain', 'data')
 
     def __init__ (self, domain, shape_or_data=None, sample_dtype=np.double):
-        self.domain = Domains.check (domain)
+        self.domain = Domains.normalize (domain)
 
         if isinstance (shape_or_data, (tuple,) + six.integer_types):
             self.data = np.empty (shape_or_data, dtype=get_aval_dtype (sample_dtype))
@@ -216,7 +226,7 @@ class Aval (object):
 
     @staticmethod
     def from_arrays (domain, kind, x, u):
-        Domains.check (domain)
+        domain = Domains.normalize (domain)
         Kinds.check (kind)
         if not _all_in_domain (x, domain):
             raise ValueError ('illegal Aval x initializer: data %r do not lie in '
@@ -255,6 +265,11 @@ class Aval (object):
     @property
     def sample_dtype (self):
         return self.data.dtype['x']
+
+    def __len__ (self):
+        if not len (self.data.shape):
+            raise TypeError ('len() of unsized object')
+        return self.data.shape[0]
 
 
     # Math.
@@ -494,7 +509,7 @@ class Aval (object):
         elif k == Kinds.upper:
             return '<%.4f' % datum['x']
 
-        return '%.3f±%.3f' % (datum['x'], datum['u'])
+        return '%.3fpm%.3f' % (datum['x'], datum['u'])
 
 
     def __unicode__ (self):
@@ -527,7 +542,7 @@ class Aval (object):
 
         where {float} stands for a floating-point number.
         """
-        Domains.check (domain)
+        domain = Domains.normalize (domain)
         rv = Aval (domain, ())
 
         if text[0] == '<':
@@ -606,7 +621,7 @@ class Uval (object):
     __slots__ = ('domain', 'data')
 
     def __init__ (self, domain, shape_or_data=None, sample_dtype=np.double):
-        self.domain = Domains.check (domain)
+        self.domain = Domains.normalize (domain)
 
         if isinstance (shape_or_data, (tuple,) + six.integer_types):
             self.data = np.empty (shape_or_data, dtype=get_uval_dtype (sample_dtype))
@@ -632,7 +647,7 @@ class Uval (object):
 
     @staticmethod
     def from_fixed (domain, kind, v):
-        Domains.check (domain)
+        domain = Domains.normalize (domain)
         Kinds.check (kind)
         if not _all_in_domain (v, domain):
             raise ValueError ('illegal Uval initializer: data %r do not lie in '
@@ -646,7 +661,7 @@ class Uval (object):
 
     @staticmethod
     def from_norm (mean, std, shape=(), domain=Domains.anything):
-        Domains.check (domain)
+        domain = Domains.normalize (domain)
         if std < 0:
             raise ValueError ('std must be positive')
 

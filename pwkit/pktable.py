@@ -95,6 +95,8 @@ class PKTable (object):
         if single_col_requested:
             return self._data[cols[0]][rowkey]
 
+        assert False, 'finish 2D table indexing'
+
 
     def __setitem__ (self, key, value):
         #self.cols[key] = value
@@ -125,12 +127,12 @@ class _PKTableColumnsHelper (object):
 
     def _fetch_columns (self, key):
         """Given an indexer `key`, fetch a list of column names corresponding to the
-        request. We return `(cols, single_col_requested)`, where
-        `single_col_requested` indicates if the key is clearly requesting a
-        single column (to be contrasted with a sub-table that happens to only
-        have one column). If the latter is the case, the returned `cols` will
-        have only one element. The specified column names may not necessarily
-        exist in `self._data`!
+        request. We return `(cols, single_col_requested)`, where `cols` is a
+        list of specific column names and `single_col_requested` indicates if
+        the key is clearly requesting a single column (to be contrasted with a
+        sub-table that happens to only have one column). If the latter is the
+        case, the returned `cols` will have only one element. The specified
+        column names may not necessarily exist in `self._data`!
 
         """
         if _is_sequence (key):
@@ -560,6 +562,61 @@ class ScalarColumn (PKTableColumnABC):
         """
         self._data = array
         return self
+
+
+    # TODO: override __{get,set}item__ to be faster when possible and to allow
+    # broadcasting.
+
+    def _get_index (self, idx):
+        return self._data[idx]
+
+    def _set_index (self, idx, value):
+        self._data[idx] = value
+
+
+class AvalColumn (PKTableColumnABC):
+    _data = None
+    "The actual Aval data."
+
+    def __init__ (self, len, domain='anything', sample_dtype=np.double, _data=None):
+        if _data is not None:
+            self._data = _data
+            return
+
+        try:
+            len = int (len)
+        except Exception:
+            raise ValueError ('AvalColumn length must be an integer')
+
+        from .msmt import Aval
+        self._data = Aval (domain, (len,), sample_dtype=sample_dtype)
+
+
+    def __len__ (self):
+        return len (self._data)
+
+
+    def __iter__ (self):
+        return iter (self._data)
+
+
+    def _sample_for_repr (self):
+        from .msmt import Aval
+        n = len (self)
+
+        if n < 5:
+            return [Aval._str_one (self._data[i].data) for i in range (n)]
+
+        return [Aval._str_one (self._data[0].data),
+                Aval._str_one (self._data[1].data),
+                '...',
+                Aval._str_one (self._data[-2].data),
+                Aval._str_one (self._data[-1].data)]
+
+    def _coldesc_for_repr (self):
+        from .msmt import Domains
+
+        return '%s %s' % (Domains.names[self._data.domain], self.__class__.__name__)
 
 
     # TODO: override __{get,set}item__ to be faster when possible and to allow
