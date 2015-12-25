@@ -296,6 +296,22 @@ class _PKTableColumnsHelper (object):
                 self._data[skey] = sval
                 continue
 
+            # TODO: try other classes
+
+            pass
+
+            # Below this point, we have a generic system for dealing with
+            # input values that resemble numpy arrays. TODO: make the system
+            # for recognizing these more generic and extensible.
+
+            arrayish_factory = None
+            arrayish_data = None
+
+            from .msmt import Aval
+            if isinstance (sval, Aval):
+                arrayish_factory = AvalColumn._new_from_data
+                arrayish_data = sval
+
             # Nothing specific worked. Last-ditch effort: np.asarray(). This
             # function will accept literally any argument, which is a bit
             # much, so we're a bit pickier and only take
@@ -304,34 +320,38 @@ class _PKTableColumnsHelper (object):
             # arrays of shape (), (n,), and (1,n), if they agree with nrows,
             # when it's known.
 
-            arr = np.asarray (sval)
-            if arr.dtype.kind not in 'bifc':
-                raise ValueError ('unhandled PKTable column value %r for %r' % (sval, skey))
+            if arrayish_factory is None:
+                arrayish_data = np.asarray (sval)
+                if arrayish_data.dtype.kind not in 'bifc':
+                    raise ValueError ('unhandled PKTable column value %r for %r' % (sval, skey))
+
+                arrayish_factory = ScalarColumn._new_from_data
+
+            # At this point arrayish_{factory,data} have been set and we can use
+            # our generic infrastructure.
 
             if not len (self._data):
-                if arr.ndim == 0:
+                if arrayish_data.ndim == 0:
                     # This is actually somewhat ill-defined. Let's err on the side of caution.
                     raise ValueError ('cannot set first PKTable column to a scalar')
-                elif arr.ndim == 1:
-                    self._data[skey] = ScalarColumn (None, _data=arr)
-                elif arr.ndim == 2:
-                    if arr.shape[0] != 1:
+                elif arrayish_data.ndim == 1:
+                    self._data[skey] = arrayish_factory (arrayish_data)
+                elif arrayish_data.ndim == 2:
+                    if arrayish_data.shape[0] != 1:
                         # Of course, we could implement this like Astropy ...
                         raise ValueError ('cannot set PKTable column to a >1D array')
-                    self._data[skey] = ScalarColumn (None, _data=arr[0])
+                    self._data[skey] = arrayish_factory (arrayish_data[0])
                 else:
                     raise ValueError ('unexpected PKTable column value %r for %r' % (sval, skey))
                 continue
 
             nrow = self._owner.shape[1]
-            if arr.ndim == 0:
-                newcol = ScalarColumn (nrow, arr.dtype)
-                newcol._data.fill (sval)
-                self._data[skey] = newcol
-            elif arr.shape == (nrow,):
-                self._data[skey] = ScalarColumn (None, _data=arr)
-            elif arr.shape == (1,nrow):
-                self._data[skey] = ScalarColumn (None, _data=arr[0])
+            if arrayish_data.ndim == 0:
+                self._data[skey] = arrayish_factory (np.broadcast_to (arrayish_data), (nrow,))
+            elif arrayish_data.shape == (nrow,):
+                self._data[skey] = arrayish_factory (arrayish_data)
+            elif arrayish_data.shape == (1,nrow):
+                self._data[skey] = arrayish_factory (arrayish_data[0])
             else:
                 raise ValueError ('unexpected PKTable column value %r for %r' % (sval, skey))
 
@@ -700,7 +720,7 @@ class ScalarColumn (PKTableAlgebraColumnABC):
     _data = None
     "The actual array data."
 
-    def __init__ (self, len, dtype=np.double, _data=None):
+    def __init__ (self, len, dtype=np.double, fillval=np.nan, _data=None):
         if _data is not None:
             self._data = _data
             return
@@ -711,6 +731,12 @@ class ScalarColumn (PKTableAlgebraColumnABC):
             raise ValueError ('ScalarColumn length must be an integer')
 
         self._data = np.empty (len, dtype=dtype)
+
+        if fillval is not None:
+            if self._data.dtype.kind in 'bi' and np.isnan (fillval):
+                fillval = 0
+            self._data.fill (fillval)
+
 
     @classmethod
     def _new_from_data (cls, data):

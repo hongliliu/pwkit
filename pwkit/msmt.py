@@ -37,7 +37,10 @@ class Domains (object):
         try:
             dval = Domains.names.index (domain)
         except ValueError:
-            dval = int (domain)
+            try:
+                dval = int (domain)
+            except (ValueError, TypeError):
+                raise ValueError ('illegal measurement domain %r' % domain)
 
         if not (dval >= cls.anything and dval <= cls.nonpositive):
             raise ValueError ('illegal measurement domain %r' % domain)
