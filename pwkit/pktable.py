@@ -93,9 +93,14 @@ class PKTable (object):
 
         cols, single_col_requested = self.cols._fetch_columns (colkey)
         if single_col_requested:
+            # A row-filtered view of a single column. We can delegate.
             return self._data[cols[0]][rowkey]
 
-        assert False, 'finish 2D table indexing'
+        # A sub-table view.
+        retval = self.__class__ ()
+        for col in cols: # do things this way to preserve ordering
+            retval._data[col] = self._data[col][rowkey]
+        return retval
 
 
     def __setitem__ (self, key, value):
@@ -170,7 +175,6 @@ class _PKTableColumnsHelper (object):
         if single_col_requested:
             return self._data[cols[0]]
 
-        # XXX: turn this into a TableView?
         retval = self._owner.__class__ ()
         for col in cols: # do things this way to preserve ordering
             retval._data[col] = self._data[col]
