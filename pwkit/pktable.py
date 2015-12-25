@@ -515,7 +515,74 @@ class _PKTableFancyIndexedColumnView (PKTableColumnABC):
         return 'fancy-index view of %s' % self._parent._coldesc_for_repr ()
 
 
-class ScalarColumn (PKTableColumnABC):
+class PKTableAlgebraColumnABC (six.with_metaclass (abc.ABCMeta, PKTableColumnABC)):
+    """A column that you can do basic algebra on. Assumes that the instance has an
+    attribute named `_data` on which the algebra can be performed, and that it
+    has a class method _new_from_data (data) that will create a new column
+    containing the specified data.
+
+    """
+    def __add__ (self, other):
+        return self.__class__._new_from_data (self._data + other)
+
+    __radd__ = __add__
+
+    def __iadd__ (self, other):
+        self._data += other
+        return self
+
+    def __sub__ (self, other):
+        return self.__class__._new_from_data (self._data - other)
+
+    def __rsub__ (self, other):
+        return self.__class__._new_from_data (other - self._data)
+
+    def __isub__ (self, other):
+        self._data -= other
+        return self
+
+    def __mul__ (self, other):
+        return self.__class__._new_from_data (self._data * other)
+
+    __rmul__ = __mul__
+
+    def __imul__ (self, other):
+        self._data *= other
+        return self
+
+    def __truediv__ (self, other):
+        return self.__class__._new_from_data (self._data / other)
+
+    def __rtruediv__ (self, other):
+        return self.__class__._new_from_data (other / self._data)
+
+    def __itruediv__ (self, other):
+        self._data /= other
+        return self
+
+    def __floordiv__ (self, other):
+        return self.__class__._new_from_data (self._data // other)
+
+    def __rfloordiv__ (self, other):
+        return self.__class__._new_from_data (other // self._data)
+
+    def __ifloordiv__ (self, other):
+        self._data //= other
+        return self
+
+    def __pow__ (self, other, modulo=None):
+        return self.__class__._new_from_data (pow (self._data, other, modulo))
+
+    def __ipow__ (self, other):
+        self._data **= other
+        return self
+
+    def __rpow__ (self, other, modulo=None):
+        return self.__class__._new_from_data (pow (other, self._data, modulo))
+
+
+
+class ScalarColumn (PKTableAlgebraColumnABC):
     _data = None
     "The actual array data."
 
@@ -530,6 +597,10 @@ class ScalarColumn (PKTableColumnABC):
             raise ValueError ('ScalarColumn length must be an integer')
 
         self._data = np.empty (len, dtype=dtype)
+
+    @classmethod
+    def _new_from_data (cls, data):
+        return cls (None, _data=data)
 
 
     def __len__ (self):
@@ -574,7 +645,7 @@ class ScalarColumn (PKTableColumnABC):
         self._data[idx] = value
 
 
-class AvalColumn (PKTableColumnABC):
+class AvalColumn (PKTableAlgebraColumnABC):
     _data = None
     "The actual Aval data."
 
@@ -590,6 +661,11 @@ class AvalColumn (PKTableColumnABC):
 
         from .msmt import Aval
         self._data = Aval (domain, (len,), sample_dtype=sample_dtype)
+
+
+    @classmethod
+    def _new_from_data (cls, data):
+        return cls (None, _data=data)
 
 
     def __len__ (self):
