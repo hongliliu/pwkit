@@ -207,7 +207,7 @@ class Aval (object):
         if domain is None:
             if np.all (v >= 0):
                 domain = Domains.nonnegative
-            elif np.all (v < 0):
+            elif np.all (v <= 0):
                 domain = Domains.nonpositive
             else:
                 domain = Domains.anything
