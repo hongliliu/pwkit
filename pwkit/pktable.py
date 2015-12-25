@@ -215,9 +215,6 @@ class _PKTableColumnsHelper (object):
         self._owner = owner
         self._data = owner._data
 
-    def __repr__ (self):
-        return '<PKTable columns: %s>' % (' '.join (six.viewkeys (self._data)))
-
     def __len__ (self):
         return len (self._data)
 
@@ -337,6 +334,20 @@ class _PKTableColumnsHelper (object):
                 self._data[skey] = ScalarColumn (None, _data=arr[0])
             else:
                 raise ValueError ('unexpected PKTable column value %r for %r' % (sval, skey))
+
+
+    def __repr__ (self):
+        maxnamelen = 0
+        info = []
+
+        for name, col in six.viewitems (self._data):
+            maxnamelen = max (maxnamelen, len (name))
+            info.append ((name, col._coldesc_for_repr ()))
+
+        if not len (info):
+            return '(PKTable columns: none defined)'
+
+        return '\n'.join (name.ljust (maxnamelen) + ' : ' + desc for name, desc in info)
 
 
 class _PKTableRowsHelper (object):
