@@ -47,6 +47,11 @@ class PKTable (object):
     and isn't speedy, but it has aggressive support for "composite" columns
     that are made out of nontrivial data structures.
 
+    Our `shape`-type values are a bit funny. `self.shape` returns `(ncols,
+    nrows)` while from a standard Numpy perspective, the ordering should be
+    `(nrows, ncols)`. Unlike Pandas, `len(self)` returns the number of
+    columns.
+
     """
     _data = None
     "An OrderedDict of columns stored by name."
@@ -73,6 +78,14 @@ class PKTable (object):
 
     def __len__ (self):
         return len (self._data)
+
+
+    def __iter__ (self):
+        """Iterate over the columns. Note that this behavior is important when writing
+        `PKTable[cols,rows] = OtherPKtable`.
+
+        """
+        return six.itervalues (self._data)
 
 
     def __getitem__ (self, key):
@@ -104,8 +117,37 @@ class PKTable (object):
 
 
     def __setitem__ (self, key, value):
-        #self.cols[key] = value
-        raise NotImplementedError ('TODO: table indexing with table views')
+        if not isinstance (key, tuple):
+            # Non-tuple indexing is defined to be on the columns.
+            self.cols[key] = value
+            return
+
+        if len (key) != 2:
+            raise ValueError ('PKTables may only be indexed with length-2 tuples')
+
+        colkey, rowkey = key
+
+        if isinstance (rowkey, types.EllipsisType):
+            self.cols[colkey] = value
+            return
+
+        if isinstance (colkey, types.EllipsisType):
+            self.rows[rowkey] = value
+            return
+
+        cols, single_col_requested = self.cols._fetch_columns (colkey)
+        if single_col_requested:
+            # A row-filtered view of a single column. We can delegate.
+            # TODO: what if the requested column doesn't exist?
+            self._data[cols[0]][rowkey] = value
+            return
+
+        # We're assigning to a sub-table.
+        sentinel = object ()
+        for colname, subval in itertools.izip (cols, value, fillvalue=sentinel):
+            if colname is sentinel or subval is sentinel:
+                raise ValueError ('disagreeing number of columns in PKTable item assignment')
+            self._data[colname][rowkey] = subval
 
 
     def __repr__ (self):
@@ -639,14 +681,25 @@ class ScalarColumn (PKTableAlgebraColumnABC):
         return self
 
 
-    # TODO: override __{get,set}item__ to be faster when possible and to allow
-    # broadcasting.
+    # Indexing.
 
     def _get_index (self, idx):
         return self._data[idx]
 
     def _set_index (self, idx, value):
         self._data[idx] = value
+
+    def __getitem__ (self, key):
+        """Seeing as the ScalarColumn carries virtually no state besides the array
+        data payload, I think it's OK for this to just return a numpy array.
+        Any table-related routine that relies on the output of this function
+        will also need to be able to accept plain-array inputs.
+
+        """
+        return self._data[key]
+
+    def __setitem__ (self, key, value):
+        self._data[key] = value
 
 
 class AvalColumn (PKTableAlgebraColumnABC):
@@ -699,11 +752,33 @@ class AvalColumn (PKTableAlgebraColumnABC):
         return '%s %s' % (Domains.names[self._data.domain], self.__class__.__name__)
 
 
-    # TODO: override __{get,set}item__ to be faster when possible and to allow
-    # broadcasting.
+    # Emulating Aval attributes.
+
+    @property
+    def domain (self):
+        return self._data.domain
+
+    @domain.setter
+    def domain (self, domain):
+        from .msmt import Domains
+        self._data.domain = Domains.normalize (domain)
+
+    @property
+    def sample_dtype (self):
+        return self._data.sample_dtype
+
+
+    # Indexing.
 
     def _get_index (self, idx):
         return self._data[idx]
 
     def _set_index (self, idx, value):
         self._data[idx] = value
+
+    def __getitem__ (self, key):
+        """Same line of reasoning as ScalarColumn."""
+        return self._data[key]
+
+    def __setitem__ (self, key, value):
+        self._data[key] = value
