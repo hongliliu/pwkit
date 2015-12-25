@@ -150,9 +150,62 @@ class PKTable (object):
             self._data[colname][rowkey] = subval
 
 
-    def __repr__ (self):
-        return '<PKTable: %d cols, %d rows>' % self.shape
+    # Stringification. TODO: a "hiding" mechanism where the user can cause
+    # columns not to be shown in the stringification, for focusing on a few
+    # particular columns in a large table.
 
+    def __repr__ (self):
+        if len (self) == 0:
+            return '(empty PKTable)'
+
+        if len (self._data) > 9:
+            colnames = self._data.keys ()[:4] + ['...'] + self._data.keys ()[-4:]
+            colobjs = self._data.values ()[:4] + [None] + self._data.values ()[-4:]
+        else:
+            colnames = list (self._data.keys ())
+            colobjs = list (self._data.values ())
+
+        nrow = self.shape[1]
+
+        if nrow > 11:
+            rowids = [0, 1, 2, 3, 4, None, nrow - 5, nrow - 4, nrow - 3, nrow - 2, nrow - 1]
+        else:
+            rowids = list (range (nrow))
+
+        maxwidths = np.array ([len (n) for n in colnames], dtype=np.int)
+        buffer = [None] * len (rowids)
+
+        for i, rid in enumerate (rowids):
+            if rid is None:
+                continue
+
+            buffer[i] = colvals = [''] * len (colobjs)
+
+            for j, col in enumerate (colobjs):
+                if col is None:
+                    continue
+
+                colvals[j] = col._repr_single_item (rid)
+                maxwidths[j] = max (maxwidths[j], len (colvals[j]))
+
+        totwidth = maxwidths.sum () + 2 * (len (colnames) - 1)
+
+        for i in range (len (rowids)):
+            if buffer[i] is None:
+                buffer[i] = '(...)'.center (totwidth)
+            else:
+                buffer[i] = '  '.join ([buffer[i][j].rjust (maxwidths[j]) for j in range (len (colnames))])
+
+        lines = ['  '.join ([n.rjust (maxwidths[i]) for i, n in enumerate (colnames)])]
+
+        if not nrow:
+            lines += ['(no rows)'.center (totwidth)]
+        else:
+            lines += ['']
+            lines += buffer
+
+        lines += ['', ('(PKTable: %d cols, %d rows)' % self.shape).rjust (totwidth)]
+        return '\n'.join (lines)
 
 
 class _PKTableColumnsHelper (object):
@@ -425,17 +478,21 @@ class PKTableColumnABC (six.with_metaclass (abc.ABCMeta, object)):
             yield self._get_index (i)
 
 
+    def _repr_single_item (self, idx):
+        return repr (self._get_index (idx))
+
+
     def _sample_for_repr (self):
         n = len (self)
 
         if n < 5:
-            return [repr (self._get_index (i)) for i in range (n)]
+            return [self._repr_single_item (i) for i in range (n)]
 
-        return [repr (self._get_index (0)),
-                repr (self._get_index (1)),
+        return [self._repr_single_item (0),
+                self._repr_single_item (1),
                 '...',
-                repr (self._get_index (n - 2)),
-                repr (self._get_index (n - 1))]
+                self._repr_single_item (n - 2),
+                self._repr_single_item (n - 1)]
 
 
     def _coldesc_for_repr (self):
@@ -733,18 +790,10 @@ class AvalColumn (PKTableAlgebraColumnABC):
         return iter (self._data)
 
 
-    def _sample_for_repr (self):
+    def _repr_single_item (self, idx):
         from .msmt import Aval
-        n = len (self)
+        return Aval._str_one (self._data[idx].data)
 
-        if n < 5:
-            return [Aval._str_one (self._data[i].data) for i in range (n)]
-
-        return [Aval._str_one (self._data[0].data),
-                Aval._str_one (self._data[1].data),
-                '...',
-                Aval._str_one (self._data[-2].data),
-                Aval._str_one (self._data[-1].data)]
 
     def _coldesc_for_repr (self):
         from .msmt import Domains
