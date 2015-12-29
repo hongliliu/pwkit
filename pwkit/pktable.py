@@ -935,6 +935,15 @@ class CoordColumn (PKTableColumnABC):
     def _new_from_data (cls, data):
         return cls (None, _data=data)
 
+    @classmethod
+    def new_from_radec_rad (cls, ra, dec):
+        ra = np.asarray (ra)
+        dec = np.asarray (dec)
+        rv = cls (len (ra))
+        rv._data[...,0] = ra
+        rv._data[...,1] = dec
+        return rv
+
 
     def __len__ (self):
         return len (self._data)
