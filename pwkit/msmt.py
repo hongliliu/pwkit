@@ -392,9 +392,24 @@ class Aval (object):
     def __imul__ (self, other):
         other = Aval.from_other (other, copy=False)
         self.domain = Domains.mul[_ordpair (self.domain, other.domain)]
-        negate = (self.data['x'] < 0) ^ (other.data['x'] < 0)
-        self.data['kind'] = Kinds.posmul[Kinds.binop (self.data['kind'], other.data['kind'])]
-        self.data['kind'][negate] = Kinds.negate[self.data['kind'][negate]]
+
+        # There's probably a simpler way to make sure that we get the limit directions
+        # correct, but this ought to at least work.
+
+        skind = self.data['kind'].copy ()
+        snegate = (self.data['x'] < 0)
+        skind[snegate] = Kinds.negate[skind[snegate]]
+
+        okind = other.data['kind'].copy ()
+        onegate = (other.data['x'] < 0)
+        okind[onegate] = Kinds.negate[okind[onegate]]
+
+        self.data['kind'] = Kinds.posmul[Kinds.binop (skind, okind)]
+        nnegate = snegate ^ onegate
+        self.data['kind'][nnegate] = Kinds.negate[self.data['kind'][nnegate]]
+
+        # Besides the kinds, this is straightforward:
+
         self.data['x'] *= other.data['x']
         self.data['u'] = np.sqrt ((self.data['u'] * other.data['x'])**2 +
                                   (other.data['u'] * self.data['x'])**2)
