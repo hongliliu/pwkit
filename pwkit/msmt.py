@@ -646,7 +646,7 @@ class Uval (object):
                 return v.copy ()
             return v
 
-        return Uval.from_fixed (Domains.anything, Kinds.sampled, v)
+        return Uval.from_fixed (Domains.anything, Kinds.msmt, v)
 
     @staticmethod
     def from_fixed (domain, kind, v):
@@ -669,7 +669,7 @@ class Uval (object):
             raise ValueError ('std must be positive')
 
         r = Uval (domain, shape)
-        r.data['kind'].fill (Kinds.sampled)
+        r.data['kind'].fill (Kinds.msmt)
         r.data['samples'] = np.random.normal (mean, std, shape+(n_samples,))
         return r
 
