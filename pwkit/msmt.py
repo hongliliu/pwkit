@@ -185,7 +185,7 @@ class Aval (object):
     parameter.
 
     """
-    __slots__ = ('domain', 'data')
+    __slots__ = ('domain', 'data', '_scalar')
 
     def __init__ (self, domain, shape_or_data=None, sample_dtype=np.double):
         self.domain = Domains.normalize (domain)
@@ -203,6 +203,15 @@ class Aval (object):
             self.data = shape_or_data
         else:
             raise ValueError ('unrecognized Aval initializer %r' % shape_or_data)
+
+        # You can't index scalar values which makes it really annoying to
+        # implement a lot of our math. So we store scalars as shape (1,) and
+        # fake the outer parts.
+
+        self._scalar = (self.data.shape == ())
+
+        if self._scalar:
+            self.data = np.atleast_1d (self.data)
 
     @staticmethod
     def from_other (v, copy=True, domain=None):
@@ -255,14 +264,20 @@ class Aval (object):
 
     @property
     def shape (self):
+        if self._scalar:
+            return ()
         return self.data.shape
 
     @property
     def ndim (self):
+        if self._scalar:
+            return 0
         return self.data.ndim
 
     @property
     def size (self):
+        if self._scalar:
+            return 1
         return self.data.size
 
     @property
@@ -270,7 +285,7 @@ class Aval (object):
         return self.data.dtype['x']
 
     def __len__ (self):
-        if not len (self.data.shape):
+        if self._scalar:
             raise TypeError ('len() of unsized object')
         return self.data.shape[0]
 
@@ -489,9 +504,13 @@ class Aval (object):
     # Indexing
 
     def __getitem__ (self, index):
+        if self._scalar:
+            raise IndexError ('invalid index to scalar variable')
         return Aval (self.domain, self.data[index])
 
     def __setitem__ (self, index, value):
+        if self._scalar:
+            raise TypeError ('object does not support item assignment')
         value = Aval.from_other (value, copy=False)
         self.domain = Domains.union[_ordpair (self.domain, value.domain)]
         self.data[index] = value.data
@@ -516,7 +535,7 @@ class Aval (object):
 
 
     def __unicode__ (self):
-        if self.ndim == 0:
+        if self._scalar:
             datum = Aval._str_one (self.data)
             return datum + ' <%s %s scalar>' % (Domains.names[self.domain],
                                                 self.__class__.__name__)
