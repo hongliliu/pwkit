@@ -2,13 +2,40 @@
 # Copyright 2013-2015 Peter Williams <peter@newton.cx> and collaborators.
 # Licensed under the MIT license.
 
-"""
-pwkit.msmt - Working with uncertain measurements.
+"""Math with uncertain measurements.
 
 """
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-__all__ = str ('''uval_unary_math''').split ()
+__all__ = str ('''
+Aval
+AvalDtypeGenerator
+aval_unary_math
+basic_unary_math
+Domains
+get_aval_dtype
+Kinds
+make_aval_data
+
+absolute
+arccos
+arcsin
+arctan
+cos
+expm1
+exp
+isfinite
+log10
+log1p
+log2
+log
+negative
+reciprocal
+sin
+sqrt
+square
+tan
+''').split ()
 
 import operator, six
 from six.moves import range
@@ -16,7 +43,7 @@ import numpy as np
 
 from . import PKError, unicode_to_str
 from .simpleenum import enumeration
-from .numutil import broadcastize
+from .numutil import broadcastize, try_asarray
 
 
 @enumeration
@@ -467,38 +494,8 @@ class Aval (object):
         return rv
 
 
-    # Unary math operations that Numpy will delegate to. These are the ones
-    # listed in [1] that have a `TD(P,...)` clause (cf. [2]).
-    # [1] https://github.com/numpy/numpy/blob/master/numpy/core/code_generators/generate_umath.py#L247
-    # [2] https://mail.scipy.org/pipermail/numpy-discussion/2012-February/060130.html).
-
-    def exp (self):
-        rv = self.copy ()
-        rv._inplace_exp ()
-        return rv
 
 
-    def log (self):
-        domain = Domains.anything
-        data = self.data.copy ()
-
-        if self.domain == Domains.nonnegative:
-            np.divide (data['u'], data['x'], data['u'])
-            np.log (data['x'], data['x'])
-        else:
-            m = (data['x'] <= 0) | (data['kind'] == Kinds.upper) | (data['kind'] == Kinds.undef)
-            data['kind'][m] = Kinds.undef
-            data['u'][m] = np.nan
-            data['x'][m] = np.nan
-            m = ~m
-            data['u'][m] = data['u'][m] / data['x'][m]
-            data['x'][m] = np.log (data['x'][m])
-
-        return Aval (domain, data)
-
-
-    def log10 (self):
-        return self.log () / np.log (10)
 
 
     # Indexing
@@ -597,6 +594,50 @@ class Aval (object):
                 raise ValueError ('uncertainty of %s is negative' % text)
 
         return rv
+
+
+def _aval_unary_absolute (q):
+    return q.copy ()._inplace_abs ()
+
+def _aval_unary_exp (q):
+    return q.copy ()._inplace_exp ()
+
+def _aval_unary_log (q):
+    domain = Domains.anything
+    data = q.data.copy ()
+
+    if q.domain == Domains.nonnegative:
+        np.divide (data['u'], data['x'], data['u'])
+        np.log (data['x'], data['x'])
+    else:
+        m = (data['x'] <= 0) | (data['kind'] == Kinds.upper) | (data['kind'] == Kinds.undef)
+        data['kind'][m] = Kinds.undef
+        data['u'][m] = np.nan
+        data['x'][m] = np.nan
+        m = ~m
+        data['u'][m] = data['u'][m] / data['x'][m]
+        data['x'][m] = np.log (data['x'][m])
+
+    return Aval (domain, data)
+
+def _aval_unary_log10 (q):
+    return _aval_unary_log (q) / np.log (10)
+
+def _aval_unary_negative (q):
+    return q.copy ()._inplace_negate ()
+
+def _aval_unary_reciprocal (q):
+    return q.copy ()._inplace_reciprocate ()
+
+
+aval_unary_math = {
+    'absolute': _aval_unary_absolute,
+    'exp': _aval_unary_exp,
+    'log10': _aval_unary_log,
+    'log': _aval_unary_log,
+    'negative': _aval_unary_negative,
+    'reciprocal': _aval_unary_reciprocal,
+}
 
 
 # Uvals -- uncertain values where the uncertainties are propagated correctly,
@@ -769,3 +810,67 @@ def _uval_unary_absolute (v):
     ##r.data['kind'][i] = Kinds.to_inf
 
     return r
+
+
+# We want/need to provide a library of standard math functions that can
+# operate on any kind of measurement -- I cannot find a way to get Numpy to
+# delegate the various standard options in a vectorized manner. Rather than
+# writing several large and complicated handle-anything functions, we
+# implement them independently for each data type, then have generic code the
+# uses the type of its argument to determine which function to invoke. This
+# declutters things and also lets the implementations of math operators take
+# advantage of the unary functions.
+
+basic_unary_math = {
+    'absolute': np.absolute,
+    'arccos': np.arccos,
+    'arcsin': np.arcsin,
+    'arctan': np.arctan,
+    'cos': np.cos,
+    'expm1': np.expm1,
+    'exp': np.exp,
+    'isfinite': np.isfinite,
+    'log10': np.log10,
+    'log1p': np.log1p,
+    'log2': np.log2,
+    'log': np.log,
+    'negative': np.negative,
+    'reciprocal': lambda x: 1. / x, # np.reciprocal floordivs ints. I don't want that.
+    'sin': np.sin,
+    'sqrt': np.sqrt,
+    'square': np.square,
+    'tan': np.tan,
+}
+
+
+def _dispatch_unary_math (name, value):
+    if isinstance (value, Aval):
+        table = aval_unary_math
+    elif try_asarray (value) is not None:
+        table = basic_unary_math
+    else:
+        raise ValueError ('cannot treat %r as a numerical for %s' % (value, name))
+
+    func = table.get (name)
+    if func is None:
+        raise ValueError ('no implementation of %s for %r' % (name, value))
+    return func (value)
+
+
+def _make_wrapped_unary_math (name):
+    def unary_mathfunc (val):
+        return _dispatch_unary_math (name, val)
+    return unary_mathfunc
+
+
+def _init_unary_math ():
+    """This function creates a variety of global unary math functions, matching
+    the keys in `basic_unary_math`.
+
+    """
+    g = globals ()
+
+    for name in six.iterkeys (basic_unary_math):
+        g[name] = _make_wrapped_unary_math (name)
+
+_init_unary_math ()
