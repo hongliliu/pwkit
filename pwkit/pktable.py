@@ -321,10 +321,10 @@ class _PKTableColumnsHelper (object):
             # when it's known.
 
             if arrayish_factory is None:
-                arrayish_data = np.asarray (sval)
-                if arrayish_data.dtype.kind not in 'bifc':
+                from .numutil import try_asarray
+                arrayish_data = try_asarray (sval)
+                if arrayish_data is None:
                     raise ValueError ('unhandled PKTable column value %r for %r' % (sval, skey))
-
                 arrayish_factory = ScalarColumn._new_from_data
 
             # At this point arrayish_{factory,data} have been set and we can use
