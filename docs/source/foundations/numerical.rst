@@ -14,12 +14,13 @@ Numerical utilities (:mod:`pwkit.numutil`)
 Summary
 -------
 
-:ref:`auto-broadcasting`
+:ref:`array-helpers`
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autosummary::
 
    broadcastize
+   try_asarray
 
 :ref:`statistics`
 ~~~~~~~~~~~~~~~~~
@@ -71,10 +72,10 @@ Summary
    make_step_rcont
 
 
-.. _auto-broadcasting:
+.. _array-helpers:
 
-Making functions that auto-broadcast their arguments
-------------------------------------------------------------------------------
+Helpers for dealing with Numpy arrays
+-------------------------------------
 
 .. decorator:: broadcastize(n_arr, ret_spec=0, force_float=True)
 
@@ -136,6 +137,8 @@ Making functions that auto-broadcast their arguments
 	 z[np.where (y)] *= 2
 	 higher_vector = [x, y, z]
 	 return z, higher_vector, 'hello'
+
+.. autofunction:: try_asarray
 
 
 .. _statistics:

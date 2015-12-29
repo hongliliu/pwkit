@@ -9,11 +9,20 @@ module provides several useful additions.
 """
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-__all__ = str ('''broadcastize dfsmooth fits_recarray_to_data_frame make_step_lcont
-           make_step_rcont make_tophat_ee make_tophat_ei make_tophat_ie
-           make_tophat_ii parallel_newton parallel_quad rms unit_tophat_ee
-           unit_tophat_ei unit_tophat_ie unit_tophat_ii usmooth weighted_mean
-           weighted_mean_df weighted_variance''').split ()
+__all__ = str ('''
+broadcastize
+dfsmooth
+fits_recarray_to_data_frame
+make_step_lcont make_step_rcont
+make_tophat_ee make_tophat_ei make_tophat_ie make_tophat_ii
+parallel_newton
+parallel_quad rms
+try_asarray
+unit_tophat_ee unit_tophat_ei unit_tophat_ie unit_tophat_ii
+usmooth
+weighted_mean
+weighted_mean_df
+weighted_variance''').split ()
 
 import functools
 from six.moves import range
@@ -120,6 +129,29 @@ class _BroadcasterDecorator (object):
         return b
 
 broadcastize = _BroadcasterDecorator
+
+
+def try_asarray (thing):
+    """Try to convert *thing* to a :class:`numpy.ndarray`.
+
+    Unlike :func:`numpy.asarray`, this will only accept things that appear to
+    contain numerical values. If *thing* appears not to be numerical,
+    :const:`None` is returned.
+
+    In particular, we call :func:`~numpy.asarray` and examine the
+    :attr:`numpy.dtype.kind` of the returned array. If it is not boolean
+    (``b``), integer (``i``), floating-point (``f``), or complex (``c``), we
+    consider the array not to be numerical.
+
+    The context is that :func:`~numpy.asarray` will accept literally anything
+    as an argument. If given a random Python object, it will return a scalar
+    or array of dtype ``Object``, which is often not helpful.
+
+    """
+    thing = np.asarray (thing)
+    if thing.dtype.kind not in 'bifc':
+        return None
+    return thing
 
 
 # Very misc.
