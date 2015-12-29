@@ -316,7 +316,6 @@ class Aval (object):
             raise TypeError ('len() of unsized object')
         return self.data.shape[0]
 
-
     # Math.
 
     def _inplace_negate (self):
@@ -509,8 +508,62 @@ class Aval (object):
         return rv
 
 
+    # Comparisons. We are conservative with the build-in operators, but have
+    # some options that are helpful.
 
+    def __lt__ (self, other):
+        raise TypeError ('uncertain value does not have a well-defined "<" comparison; use lt() with caution')
 
+    def __le__ (self, other):
+        raise TypeError ('uncertain value does not have a well-defined "<=" comparison; use le() with caution')
+
+    def __gt__ (self, other):
+        raise TypeError ('uncertain value does not have a well-defined ">" comparison; use gt() with caution')
+
+    def __ge__ (self, other):
+        raise TypeError ('uncertain value does not have a well-defined ">=" comparison; use ge() with caution')
+
+    def __eq__ (self, other):
+        raise TypeError ('uncertain value does not have a well-defined "==" comparison')
+
+    def __ne__ (self, other):
+        raise TypeError ('uncertain value does not have a well-defined "!=" comparison')
+
+    def lt (self, other):
+        """Returns true where the values in *self* are less than *other*, following this
+        definition:
+
+        - The result for *undef* values is always false
+        - The result for *msmt* values is the result of comparing the "representative" value.
+        - The result for limits is true if the limit is contained entirely within
+          the proposed interval.
+
+        TODO: arguments adjusting the behavior.
+
+        """
+        rv = (((self.data['kind'] == Kinds.msmt) | (self.data['kind'] == Kinds.upper))
+              & (self.data['x'] < other))
+
+        if other > 0 and self.domain == Domains.nonpositive:
+            # This is the only way that a lower limit can result in True in
+            # the strict definition.
+            rv[self.data['kind'] == Kinds.lower] = True
+
+        if self._scalar:
+            rv = rv[0]
+        return rv
+
+    def gt (self, other):
+        """Note that cannot simply invert `lt` since we have to handle undefs properly."""
+        rv = (((self.data['kind'] == Kinds.msmt) | (self.data['kind'] == Kinds.lower))
+              & (self.data['x'] > other))
+
+        if other < 0 and self.domain == Domains.nonnegative:
+            rv[self.data['kind'] == Kinds.upper] = True
+
+        if self._scalar:
+            rv = rv[0]
+        return rv
 
 
     # Indexing

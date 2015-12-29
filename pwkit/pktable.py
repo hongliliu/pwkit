@@ -714,6 +714,23 @@ class PKTableAlgebraColumnABC (six.with_metaclass (abc.ABCMeta, PKTableColumnABC
     def __rpow__ (self, other, modulo=None):
         return self.__class__._new_from_data (pow (other, self._data, modulo))
 
+    def __lt__ (self, other):
+        return (self._data < other) # note: we are returning bool array, not PKTableColumn
+
+    def __le__ (self, other):
+        return (self._data <= other)
+
+    def __gt__ (self, other):
+        return (self._data > other)
+
+    def __ge__ (self, other):
+        return (self._data >= other)
+
+    def __eq__ (self, other):
+        return (self._data == other)
+
+    def __ne__ (self, other):
+        return (self._data != other)
 
 
 class ScalarColumn (PKTableAlgebraColumnABC):
