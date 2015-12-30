@@ -8,15 +8,24 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 __all__ = str ('''
-Approximate
-ApproximateDtypeGenerator
-approximate_unary_math
-basic_unary_math
 Domain
-get_approximate_dtype
-Kind
-make_approximate_data
 
+Kind
+
+sampled_n_samples
+SampledDtypeGenerator
+get_sampled_dtype
+make_sampled_data
+Sampled
+sampled_unary_math
+
+ApproximateDtypeGenerator
+get_approximate_dtype
+make_approximate_data
+Approximate
+approximate_unary_math
+
+basic_unary_math
 absolute
 arccos
 arcsin
@@ -48,6 +57,9 @@ from .numutil import broadcastize, try_asarray
 
 @enumeration
 class Domain (object):
+    """An enumeration of possible domains that measurements may span.
+
+    """
     anything = 0
     nonnegative = 1
     nonpositive = 2
@@ -171,10 +183,240 @@ class Kind (object):
     ])
 
 
+# A Sampled measurement is one in which we propagate uncertainties the only
+# fully tractable way -- by approximating each measurement with a large number
+# of samples that are then processed vectorially. It's absurdly
+# memory-inefficient, but works, unlike analytic error propagation, which
+# fails in many real applications.
+
+sampled_n_samples = 1024 - 1 # each Sampled takes 1024*itemsize bytes
+
+class SampledDtypeGenerator (object):
+    def __init__ (self):
+        self.cache = {}
+
+    def __call__ (self, sample_dtype):
+        prev = self.cache.get (sample_dtype)
+        if prev is not None:
+            return prev
+
+        # The `str` calls are needed for Python 2.x since unicode_literals is
+        # activated.
+        npad = np.dtype (sample_dtype).itemsize - 1
+        dtype = np.dtype ([
+            (str ('kind'), np.uint8, 1),
+            (str ('_pad'), np.uint8, npad),
+            (str ('samples'), sample_dtype, sampled_n_samples),
+        ])
+        self.cache[sample_dtype] = dtype
+        return dtype
+
+get_sampled_dtype = SampledDtypeGenerator ()
+
+def make_sampled_data (kinds, samples):
+    data = np.empty (kinds.shape, dtype=get_sampled_dtype (samples.dtype))
+    data['kind'] = kinds
+    data['samples'] = samples
+    return data
+
+
+class Sampled (object):
+    """An empirical uncertain value, represented by samples.
+
+    """
+    __slots__ = ('domain', 'data', '_scalar')
+
+    def __init__ (self, domain, shape_or_data=None, sample_dtype=np.double):
+        self.domain = Domain.normalize (domain)
+
+        if isinstance (shape_or_data, (tuple,) + six.integer_types):
+            self.data = np.empty (shape_or_data, dtype=get_sampled_dtype (sample_dtype))
+            self.data['kind'].fill (Kind.undef)
+        elif isinstance (shape_or_data, (np.ndarray, np.void)):
+            # Scalars end up as the `np.void` type. It's hard to check the
+            # array dtype thoroughly but let's do this:
+            try:
+                assert shape_or_data['kind'].dtype == np.uint8
+            except Exception:
+                raise ValueError ('illegal Sampled initializer array %r' % shape_or_data)
+            self.data = shape_or_data
+        else:
+            raise ValueError ('unrecognized Sampled initializer %r' % shape_or_data)
+
+    @staticmethod
+    def from_other (v, copy=True, domain=None):
+        if isinstance (v, Sampled):
+            if copy:
+                return v.copy ()
+            return v
+
+        # TODO: handle other value types. If we're here, we just have some
+        # array of floats. Domain can only get less restrictive when we do
+        # math on them, so it's OK to choose the best domain we can given the
+        # data we have.
+
+        v = np.asarray (v)
+        if domain is None:
+            if np.all (v >= 0):
+                domain = Domain.nonnegative
+            elif np.all (v <= 0):
+                domain = Domain.nonpositive
+            else:
+                domain = Domain.anything
+
+        return Sampled.from_exact_array (domain, Kind.msmt, v)
+
+    @staticmethod
+    def from_exact_array (domain, kind, v):
+        domain = Domain.normalize (domain)
+        Kind.check (kind)
+        if not _all_in_domain (v, domain):
+            raise ValueError ('illegal Sampled initializer: data %r do not lie in '
+                              'stated domain' % v)
+
+        v = np.asarray (v)
+        r = Sampled (domain, v.shape)
+        r.data['kind'] = kind
+        r.data['samples'] = v[...,None]
+        return r
+
+    @classmethod
+    def from_norm (cls, mean, std, shape=(), domain=Domain.anything):
+        domain = Domain.normalize (domain)
+        if std < 0:
+            raise ValueError ('std must be nonnegative')
+
+        r = cls (domain, shape)
+        r.data['kind'].fill (Kind.msmt)
+        r.data['samples'] = np.random.normal (mean, std, shape+(sampled_n_samples,))
+        return r
+
+    def copy (self):
+        return self.__class__ (self.domain, self.data.copy ())
+
+    # Basic array properties
+
+    @property
+    def shape (self):
+        if self._scalar:
+            return ()
+        return self.data.shape
+
+    @property
+    def ndim (self):
+        if self._scalar:
+            return 1
+        return self.data.ndim
+
+    @property
+    def size (self):
+        if self._scalar:
+            return 1
+        return self.data.size
+
+    @property
+    def sample_dtype (self):
+        return self.data.dtype['samples']
+
+    def __len__ (self):
+        if self._scalar:
+            raise TypeError ('len() of unsized object')
+        return self.data.shape[0]
+
+    # Math.
+
+    def _inplace_negate (self):
+        self.domain = Domain.negate[self.domain]
+        self.data['kind'] = Kind.negate[self.data['kind']]
+        np.negative (self.data['samples'], self.data['samples'])
+        return self
+
+
+    def __neg__ (self):
+        rv = self.copy ()
+        rv._inplace_negate ()
+        return rv
+
+    # Comparisons. We are conservative with the build-in operators, but have
+    # some options that are helpful.
+
+    def __lt__ (self, other):
+        raise TypeError ('uncertain value does not have a well-defined "<" comparison; use lt() with caution')
+
+    def __le__ (self, other):
+        raise TypeError ('uncertain value does not have a well-defined "<=" comparison; use le() with caution')
+
+    def __gt__ (self, other):
+        raise TypeError ('uncertain value does not have a well-defined ">" comparison; use gt() with caution')
+
+    def __ge__ (self, other):
+        raise TypeError ('uncertain value does not have a well-defined ">=" comparison; use ge() with caution')
+
+    def __eq__ (self, other):
+        raise TypeError ('uncertain value does not have a well-defined "==" comparison')
+
+    def __ne__ (self, other):
+        raise TypeError ('uncertain value does not have a well-defined "!=" comparison')
+
+
+    # Indexing
+
+    def __getitem__ (self, index):
+        if self._scalar:
+            raise IndexError ('invalid index to scalar variable')
+        return Sampled (self.domain, self.data[index])
+
+    def __setitem__ (self, index, value):
+        if self._scalar:
+            raise TypeError ('object does not support item assignment')
+        value = Sampled.from_other (value, copy=False)
+        self.domain = Domain.union[_ordpair (self.domain, value.domain)]
+        self.data[index] = value.data
+
+
+    # Stringification
+
+    @staticmethod
+    def _str_one (datum):
+        raise NotImplementedError ()
+
+
+    def __unicode__ (self):
+        if self._scalar:
+            datum = Sampled._str_one (self.data)
+            return datum + ' <%s %s scalar>' % (Domain.names[self.domain],
+                                                self.__class__.__name__)
+        else:
+            text = np.array2string (self.data, formatter={'all': Sampled._str_one})
+            return text + ' <%s %s %r-array>' % (Domain.names[self.domain],
+                                                 self.__class__.__name__,
+                                                 self.shape)
+
+    __str__ = unicode_to_str
+
+
+    def __repr__ (self):
+        return str (self)
+
+
+    @staticmethod
+    def parse (text, domain=Domain.anything):
+        raise NotImplementedError ()
+
+
+def _sampled_unary_negative (q):
+    return q.copy ()._inplace_negate ()
+
+
+sampled_unary_math = {
+    'negative': _sampled_unary_negative,
+}
+
+
 # "Approximate" measurements. These do not have the absurd memory requirements
-# of Sampled, but their uncertainty assessment is only ... approximate. We
-# just do simplemended error propagation a courtesy; it very easily confused
-# and should not be used for careful work.
+# of Sampled, but their uncertainty assessment is only ... approximate. We do
+# simplemended error propagation as a courtesy; it very easily confused and
+# should not be used for careful work.
 
 class ApproximateDtypeGenerator (object):
     def __init__ (self):
@@ -209,8 +451,7 @@ def make_approximate_data (kind, x, u):
 
 
 class Approximate (object):
-    """An approximate uncertain value, represented with a scalar uncertainty
-    parameter.
+    """An approximate uncertain value, represented with a scalar uncertainty parameter.
 
     """
     __slots__ = ('domain', 'data', '_scalar')
@@ -709,176 +950,6 @@ approximate_unary_math = {
 }
 
 
-# Uvals -- uncertain values where the uncertainties are propagated correctly,
-# simply by doing math on large arrays of samples.
-
-n_samples = 1024 - 1 # each Uval takes 1024*itemsize bytes
-
-class UvalDtypeGenerator (object):
-    def __init__ (self):
-        self.cache = {}
-
-    def __call__ (self, sample_dtype):
-        prev = self.cache.get (sample_dtype)
-        if prev is not None:
-            return prev
-
-        # The `str` calls are needed for Python 2.x since unicode_literals is
-        # activated.
-        npad = np.dtype (sample_dtype).itemsize - 1
-        dtype = np.dtype ([
-            (str ('kind'), np.uint8, 1),
-            (str ('_pad'), np.uint8, npad),
-            (str ('samples'), sample_dtype, n_samples),
-        ])
-        self.cache[sample_dtype] = dtype
-        return dtype
-
-get_uval_dtype = UvalDtypeGenerator ()
-
-def make_uval_data (kinds, samples):
-    data = np.empty (kinds.shape, dtype=get_uval_dtype (samples.dtype))
-    data['kind'] = kinds
-    data['samples'] = samples
-    return data
-
-
-uval_default_repval_method = 'pct'
-
-
-class Uval (object):
-    """An empirical uncertain value, represented by samples.
-
-    """
-    __slots__ = ('domain', 'data')
-
-    def __init__ (self, domain, shape_or_data=None, sample_dtype=np.double):
-        self.domain = Domain.normalize (domain)
-
-        if isinstance (shape_or_data, (tuple,) + six.integer_types):
-            self.data = np.empty (shape_or_data, dtype=get_uval_dtype (sample_dtype))
-            self.data['kind'].fill (Kind.undef)
-        elif isinstance (shape_or_data, np.ndarray):
-            # It's hard to check the array dtype thoroughly but let's do this:
-            try:
-                assert shape_or_data['kind'].dtype == np.uint8
-            except Exception:
-                raise ValueError ('illegal Uval initializer array %r' % shape_or_data)
-            self.data = shape_or_data
-        else:
-            raise ValueError ('unrecognized Uval initializer %r' % shape_or_data)
-
-    @staticmethod
-    def from_other (v, copy=True):
-        if isinstance (v, Uval):
-            if copy:
-                return v.copy ()
-            return v
-
-        return Uval.from_fixed (Domain.anything, Kind.msmt, v)
-
-    @staticmethod
-    def from_fixed (domain, kind, v):
-        domain = Domain.normalize (domain)
-        Kind.check (kind)
-        if not _all_in_domain (v, domain):
-            raise ValueError ('illegal Uval initializer: data %r do not lie in '
-                              'stated domain' % v)
-
-        v = np.asarray (v)
-        r = Uval (domain, v.shape)
-        r.data['kind'] = kind
-        r.data['samples'] = v[...,None]
-        return r
-
-    @staticmethod
-    def from_norm (mean, std, shape=(), domain=Domain.anything):
-        domain = Domain.normalize (domain)
-        if std < 0:
-            raise ValueError ('std must be positive')
-
-        r = Uval (domain, shape)
-        r.data['kind'].fill (Kind.msmt)
-        r.data['samples'] = np.random.normal (mean, std, shape+(n_samples,))
-        return r
-
-    def copy (self):
-        return self.__class__ (self.domain, self.data.copy ())
-
-    # Basic array properties
-
-    @property
-    def shape (self):
-        return self.data.shape
-
-    @property
-    def ndim (self):
-        return self.data.ndim
-
-    @property
-    def size (self):
-        return self.data.size
-
-    # Math. We start with addition. It gets complicated!
-
-    def __neg__ (self):
-        return _uval_unary_negative (self)
-
-    def __abs__ (self):
-        return _uval_unary_absolute (self)
-
-
-    def __add__ (self, other):
-        other = Uval.from_other (other, copy=False)
-        dom = Domain.add[_ordpair (self.domain, other.domain)]
-        kind = Kind.add[Kind.binop (self.data['kind'], other.data['kind'])]
-        tot = self.data['samples'] + other.data['samples']
-        return Uval (dom, make_uval_data (kind, tot))
-
-    def __iadd__ (self, other):
-        other = Uval.from_other (other, copy=False)
-        self.domain = Domain.add[_ordpair (self.domain, other.domain)]
-        self.data['kind'] = Kind.add[Kind.binop (self.data['kind'], other.data['kind'])]
-        self.data['samples'] += other.data['samples']
-        return self
-
-    __radd__ = __add__
-
-    def __sub__ (self, other):
-        return self + (-other)
-
-    def __isub__ (self, other):
-        self += (-other)
-        return self
-
-    __rsub__ = __sub__
-
-
-    def __mul__ (self, other):
-        other = Uval.from_other (other, copy=False)
-        dom = Domain.mul[_ordpair (self.domain, other.domain)]
-
-
-
-def _uval_unary_negative (v):
-    r = v.copy ()
-    r.domain = Domain.negate[v.domain]
-    r.data['kind'] = Kind.negate[v.data['kind']]
-    np.negative (r.data['samples'], r.data['samples'])
-    return r
-
-
-def _uval_unary_absolute (v):
-    r = v.copy ()
-    r.domain = Domain.nonnegative
-    np.absolute (r.data['samples'], r.data['samples'])
-
-    assert False, 'figure out what to do here'
-    ##i = np.nonzero (r.data['kind'] == Kind.past_zero)
-    ##r.data['samples'][i] = 0.
-    ##r.data['kind'][i] = Kind.to_inf
-
-    return r
 
 
 # We want/need to provide a library of standard math functions that can
@@ -915,6 +986,8 @@ basic_unary_math = {
 def _dispatch_unary_math (name, value):
     if isinstance (value, Approximate):
         table = approximate_unary_math
+    elif isinstance (value, Sampled):
+        table = sampled_unary_math
     elif try_asarray (value) is not None:
         table = basic_unary_math
     else:
@@ -934,7 +1007,7 @@ def _make_wrapped_unary_math (name):
 
 def _init_unary_math ():
     """This function creates a variety of global unary math functions, matching
-    the keys in `basic_unary_math`.
+    the keys in :data:`basic_unary_math`.
 
     """
     g = globals ()
