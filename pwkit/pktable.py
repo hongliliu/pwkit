@@ -354,7 +354,7 @@ class _PKTableColumnsHelper (object):
 
             nrow = self._owner.shape[1]
             if arrayish_data.ndim == 0:
-                self._data[skey] = arrayish_factory (np.broadcast_to (arrayish_data), (nrow,))
+                self._data[skey] = arrayish_factory (np.broadcast_to (arrayish_data, (nrow,)))
             elif arrayish_data.shape == (nrow,):
                 self._data[skey] = arrayish_factory (arrayish_data)
             elif arrayish_data.shape == (1,nrow):
