@@ -269,7 +269,6 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, object)):
         raise NotImplementedError ()
 
 
-
     # Algebra -- given in-place operations, we can do the rest generically.
     # These of course can be overridden by subclasses if needed.
 
@@ -608,6 +607,7 @@ class Sampled (MeasurementABC):
     def sample_dtype (self):
         return self.data.dtype['samples']
 
+
     # Algebra
 
     def _inplace_negate (self):
@@ -735,7 +735,7 @@ sampled_unary_math = {
 
 # "Approximate" measurements. These do not have the absurd memory requirements
 # of Sampled, but their uncertainty assessment is only ... approximate. We do
-# simplemended error propagation as a courtesy; it very easily confused and
+# simpleminded error propagation as a courtesy; it very easily confused and
 # should not be used for careful work.
 
 class ApproximateDtypeGenerator (object):
@@ -833,11 +833,13 @@ class Approximate (MeasurementABC):
 
         return r
 
+
     # (Additional) basic array properties
 
     @property
     def sample_dtype (self):
         return self.data.dtype['x']
+
 
     # Algebra
 
@@ -977,7 +979,10 @@ class Approximate (MeasurementABC):
 
 
     def gt (self, other):
-        """Note that cannot simply invert `lt` since we have to handle undefs properly."""
+        """Note that we cannot simply invert `lt` since we have to handle undefs
+        properly.
+
+        """
         rv = (((self.data['kind'] == Kind.msmt) | (self.data['kind'] == Kind.lower))
               & (self.data['x'] > other))
 
