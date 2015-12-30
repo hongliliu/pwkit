@@ -397,43 +397,39 @@ class _PKTableRowsHelper (object):
 
 
     def _fetch_rows (self, key):
-        """Given an indexer `key`, fetch a list of row indices corresponding to the
-        request. We return `(rows, single_row_requested)`, where
-        `single_row_requested` indicates if the key is clearly requesting a
-        single row (to be contrasted with a sub-table that happens to only
-        have one row). If the latter is the case, the returned `rows` will
-        have only one element. Unlike the equivalent function in ColsHelper,
-        existing rows must be referenced -- you cannot create rows with
-        __setitem__.
+        """Given an indexer `key`, fetch a list of row indices corresponding
+        to the request. We return `(rows, single_row_requested)`, where `rows`
+        is either an 1-D integer ndarray of row indices (0 <= idx <
+        len(self)), or a Slice object, and `single_row_requested` indicates if
+        the key is clearly requesting a single row (to be contrasted with a
+        sub-table that happens to only have one row). If the latter is the
+        case, the returned `rows` will have only one element. Unlike the
+        equivalent function in ColsHelper, existing rows must be referenced --
+        you cannot create rows with __setitem__.
 
         """
-        if _is_sequence (key):
-            maybe_single_row = False
-        else:
-            maybe_single_row = True
-            key = [key]
-
-        retrows = []
         n = len (self)
+        a = np.asarray (key)
+        indices = None
 
-        for thing in key:
-            if isinstance (thing, six.integer_types):
-                retrows.append (_normalize_index (thing, n, 'row'))
-            elif isinstance (thing, types.SliceType):
-                maybe_single_row = False
-                retrows += [_normalize_index (i, n, 'row')
-                            for i in range (*thing.indices (n))]
-            else:
-                raise KeyError ('unhandled PKTable row indexer %r' % (thing,))
+        if a.dtype.kind == 'b' and a.shape == (n,):
+            indices = np.nonzero (a)[0]
+        elif a.dtype.kind == 'i' and a.ndim == 1:
+            indices = a.copy ()
+            indices[indices < 0] += n
+            if np.any ((indices < 0) | (indices >= n)):
+                raise ValueError ('illegal row fancy-index %r; there are %d rows' % (key, n))
 
-        if len (retrows) == 1 and maybe_single_row:
-            # If all the evidence is that the caller wanted to pull out a
-            # single row, indicate this. Something like `t.rows[[0]]` will NOT
-            # do this, though, since the intent is pretty clearly to extract a
-            # sub-table.
-            return retrows, True
+        if indices is not None:
+            return indices, False
 
-        return retrows, False
+        if isinstance (key, types.SliceType):
+            return key, False
+
+        if isinstance (thing, six.integer_types):
+            return np.array ([thing]), True
+
+        raise KeyError ('unhandled PKTable row indexer %r' % (key,))
 
 
     def __getitem__ (self, key):
@@ -442,16 +438,21 @@ class _PKTableRowsHelper (object):
         if single_row_requested:
             return _PKTableRowProxy (self._owner, rows[0])
 
-        raise NotImplementedError ('implement row-filtered column views')
+        if isinstance (rows, types.SliceType):
+            wrapper = lambda c: _PKTableSlicedColumnView (c, rows)
+        else:
+            wrapper = lambda c: _PKTableFancyIndexedColumnView (c, rows)
+
+        retval = self._owner.__class__ ()
+        for name, col in six.viewitems (self._data):
+            retval[name] = wrapper (col)
+
+        return retval
 
 
     def __setitem__ (self, key, value):
-        retrows, single_row_requested = self._fetch_rows (key)
-        if single_row_requested:
-            value = [value]
-
-        for skey, sval in itertools.izip (retrows, value):
-            raise NotImplementedError ('hmmmmm')
+        rows, single_row_requested = self._fetch_rows (key)
+        raise NotImplementedError ('hmmmmm')
 
 
 class _PKTableRowProxy (object):
