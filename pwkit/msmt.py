@@ -249,6 +249,9 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, object)):
     def _inplace_reciprocate (self):
         raise NotImplementedError ()
 
+    def _inplace_log (self):
+        raise NotImplementedError ()
+
     def _inplace_exp (self):
         raise NotImplementedError ()
 
@@ -685,6 +688,23 @@ class Approximate (MeasurementABC):
         return self
 
 
+    def _inplace_log (self):
+        if self.domain == Domain.nonnegative:
+            np.divide (self.data['u'], self.data['x'], self.data['u'])
+            np.log (self.data['x'], self.data['x'])
+        else:
+            m = (self.data['x'] <= 0) | (self.data['kind'] == Kind.upper) | (self.data['kind'] == Kind.undef)
+            self.data['kind'][m] = Kind.undef
+            self.data['u'][m] = np.nan
+            self.data['x'][m] = np.nan
+            m = ~m
+            self.data['u'][m] = self.data['u'][m] / self.data['x'][m]
+            self.data['x'][m] = np.log (self.data['x'][m])
+
+        self.domain = Domain.anything
+        return self
+
+
     def _inplace_exp (self):
         self.domain = Domain.nonnegative
         # kind is unchanged
@@ -904,22 +924,7 @@ def _approximate_unary_exp (q):
     return q.copy ()._inplace_exp ()
 
 def _approximate_unary_log (q):
-    domain = Domain.anything
-    data = q.data.copy ()
-
-    if q.domain == Domain.nonnegative:
-        np.divide (data['u'], data['x'], data['u'])
-        np.log (data['x'], data['x'])
-    else:
-        m = (data['x'] <= 0) | (data['kind'] == Kind.upper) | (data['kind'] == Kind.undef)
-        data['kind'][m] = Kind.undef
-        data['u'][m] = np.nan
-        data['x'][m] = np.nan
-        m = ~m
-        data['u'][m] = data['u'][m] / data['x'][m]
-        data['x'][m] = np.log (data['x'][m])
-
-    return Approximate._from_data (domain, data)
+    return q.copy ()._inplace_log ()
 
 def _approximate_unary_log10 (q):
     return _approximate_unary_log (q) / np.log (10)
@@ -934,13 +939,11 @@ def _approximate_unary_reciprocal (q):
 approximate_unary_math = {
     'absolute': _approximate_unary_absolute,
     'exp': _approximate_unary_exp,
-    'log10': _approximate_unary_log,
+    'log10': _approximate_unary_log10,
     'log': _approximate_unary_log,
     'negative': _approximate_unary_negative,
     'reciprocal': _approximate_unary_reciprocal,
 }
-
-
 
 
 # We want/need to provide a library of standard math functions that can
