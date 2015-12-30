@@ -590,7 +590,20 @@ class Sampled (MeasurementABC):
 
     @staticmethod
     def _str_one (datum):
-        raise NotImplementedError () # TODO
+        k = datum['kind']
+
+        # TODO: better control of precision
+
+        if k == Kind.undef:
+            return '?'
+        elif k == Kind.lower:
+            return '>%.4f' % datum['samples'][0]
+        elif k == Kind.upper:
+            return '<%.4f' % datum['samples'][0]
+
+        # XXX temporary
+        return '%.3fpm%.3f' % (datum['samples'].mean (), datum['samples'].std ())
+
 
     @classmethod
     def parse (cls, text, domain=Domain.anything):
