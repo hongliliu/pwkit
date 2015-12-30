@@ -203,11 +203,11 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, object)):
 
     @classmethod
     def _from_data (cls, domain, data):
-        """This default implementation assumes that __init__ has a _noalloc keyword
-        argument that leaves the new object essentially unfilled.
+        """This default implementation assumes that __init__ has a signature
+        compatible with: __init__ (domain, None, _noalloc=False)
 
         """
-        rv = cls (domain, _noalloc=True)
+        rv = cls (domain, None, _noalloc=True)
         rv.data = data
         rv._scalar = (rv.data.shape == ())
         if rv._scalar:
@@ -500,7 +500,7 @@ class Sampled (MeasurementABC):
     """An empirical uncertain value, represented by samples.
 
     """
-    def __init__ (self, domain, shape=None, sample_dtype=np.double, _noalloc=False, _noinit=False):
+    def __init__ (self, domain, shape, sample_dtype=np.double, _noalloc=False, _noinit=False):
         self.domain = Domain.normalize (domain)
 
         if _noalloc:
@@ -655,7 +655,7 @@ class Approximate (MeasurementABC):
     """An approximate uncertain value, represented with a scalar uncertainty parameter.
 
     """
-    def __init__ (self, domain, shape=None, sample_dtype=np.double, _noalloc=False, _noinit=False):
+    def __init__ (self, domain, shape, sample_dtype=np.double, _noalloc=False, _noinit=False):
         self.domain = Domain.normalize (domain)
 
         if _noalloc:
