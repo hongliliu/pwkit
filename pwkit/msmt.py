@@ -8,14 +8,14 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 __all__ = str ('''
-Aval
-AvalDtypeGenerator
-aval_unary_math
+Approximate
+ApproximateDtypeGenerator
+approximate_unary_math
 basic_unary_math
 Domain
-get_aval_dtype
+get_approximate_dtype
 Kind
-make_aval_data
+make_approximate_data
 
 absolute
 arccos
@@ -121,7 +121,7 @@ class Kind (object):
     @classmethod
     def check (cls, kinds):
         if not np.all ((kinds >= Kind.undef) & (kinds <= Kind.lower)):
-            raise ValueError ('illegal Aval kind(s) %r' % kinds)
+            raise ValueError ('illegal measurement kind(s) %r' % kinds)
         return kinds
 
     negate = np.array ([undef, msmt, lower, upper])
@@ -171,11 +171,12 @@ class Kind (object):
     ])
 
 
-# Avals -- "approximate" measurements. We do very simpleminded error
-# propagation as a courtesy, but it very easily confused and should not be
-# used for careful work.
+# "Approximate" measurements. These do not have the absurd memory requirements
+# of Sampled, but their uncertainty assessment is only ... approximate. We
+# just do simplemended error propagation a courtesy; it very easily confused
+# and should not be used for careful work.
 
-class AvalDtypeGenerator (object):
+class ApproximateDtypeGenerator (object):
     def __init__ (self):
         self.cache = {}
 
@@ -196,18 +197,18 @@ class AvalDtypeGenerator (object):
         self.cache[sample_dtype] = dtype
         return dtype
 
-get_aval_dtype = AvalDtypeGenerator ()
+get_approximate_dtype = ApproximateDtypeGenerator ()
 
 
-def make_aval_data (kind, x, u):
-    data = np.empty (kind.shape, dtype=get_aval_dtype (x.dtype))
+def make_approximate_data (kind, x, u):
+    data = np.empty (kind.shape, dtype=get_approximate_dtype (x.dtype))
     data['kind'] = kind
     data['x'] = x
     data['u'] = u
     return data
 
 
-class Aval (object):
+class Approximate (object):
     """An approximate uncertain value, represented with a scalar uncertainty
     parameter.
 
@@ -218,7 +219,7 @@ class Aval (object):
         self.domain = Domain.normalize (domain)
 
         if isinstance (shape_or_data, (tuple,) + six.integer_types):
-            self.data = np.empty (shape_or_data, dtype=get_aval_dtype (sample_dtype))
+            self.data = np.empty (shape_or_data, dtype=get_approximate_dtype (sample_dtype))
             self.data['kind'].fill (Kind.undef)
         elif isinstance (shape_or_data, (np.ndarray, np.void)):
             # Scalars end up as the `np.void` type. It's hard to check the
@@ -226,10 +227,10 @@ class Aval (object):
             try:
                 assert shape_or_data['kind'].dtype == np.uint8
             except Exception:
-                raise ValueError ('illegal Aval initializer array %r' % shape_or_data)
+                raise ValueError ('illegal Approximate initializer array %r' % shape_or_data)
             self.data = shape_or_data
         else:
-            raise ValueError ('unrecognized Aval initializer %r' % shape_or_data)
+            raise ValueError ('unrecognized Approximate initializer %r' % shape_or_data)
 
         # You can't index scalar values which makes it really annoying to
         # implement a lot of our math. So we store scalars as shape (1,) and
@@ -242,7 +243,7 @@ class Aval (object):
 
     @staticmethod
     def from_other (v, copy=True, domain=None):
-        if isinstance (v, Aval):
+        if isinstance (v, Approximate):
             if copy:
                 return v.copy ()
             return v
@@ -261,24 +262,24 @@ class Aval (object):
             else:
                 domain = Domain.anything
 
-        return Aval.from_arrays (domain, Kind.msmt, v, 0)
+        return Approximate.from_arrays (domain, Kind.msmt, v, 0)
 
     @staticmethod
     def from_arrays (domain, kind, x, u):
         domain = Domain.normalize (domain)
         Kind.check (kind)
         if not _all_in_domain (x, domain):
-            raise ValueError ('illegal Aval x initializer: data %r do not lie in '
+            raise ValueError ('illegal Approximate x initializer: data %r do not lie in '
                               'stated domain' % x)
 
         x = np.asarray (x)
-        r = Aval (domain, x.shape)
+        r = Approximate (domain, x.shape)
         r.data['kind'] = kind
         r.data['x'] = x
         r.data['u'] = u
 
         if not _all_in_domain (r.data['u'], Domain.nonnegative):
-            raise ValueError ('illegal Aval u initializer: some values %r '
+            raise ValueError ('illegal Approximate u initializer: some values %r '
                               'are negative' % u)
 
         return r
@@ -363,7 +364,7 @@ class Aval (object):
 
 
     def __iadd__ (self, other):
-        other = Aval.from_other (other, copy=False)
+        other = Approximate.from_other (other, copy=False)
         self.domain = Domain.add[_ordpair (self.domain, other.domain)]
         self.data['kind'] = Kind.add[Kind.binop (self.data['kind'], other.data['kind'])]
         self.data['x'] += other.data['x']
@@ -389,7 +390,7 @@ class Aval (object):
 
 
     def __imul__ (self, other):
-        other = Aval.from_other (other, copy=False)
+        other = Approximate.from_other (other, copy=False)
         self.domain = Domain.mul[_ordpair (self.domain, other.domain)]
 
         # There's probably a simpler way to make sure that we get the limit directions
@@ -443,12 +444,12 @@ class Aval (object):
 
     def __ipow__ (self, other, modulo=None):
         if modulo is not None:
-            raise ValueError ('powmod behavior forbidden with Avals')
+            raise ValueError ('powmod behavior forbidden with Approximates')
 
         try:
             v = float (other)
         except TypeError:
-            raise ValueError ('Avals can only be exponentiated by exact values')
+            raise ValueError ('Approximates can only be exponentiated by exact values')
 
         if v == 0:
             self.domain = Domain.nonnegative
@@ -501,7 +502,7 @@ class Aval (object):
         for undoing logarithms; i.e. 10**x."""
 
         if modulo is not None:
-            raise ValueError ('powmod behavior forbidden with Avals')
+            raise ValueError ('powmod behavior forbidden with Approximates')
 
         rv = self * np.log (other)
         rv._inplace_exp ()
@@ -571,12 +572,12 @@ class Aval (object):
     def __getitem__ (self, index):
         if self._scalar:
             raise IndexError ('invalid index to scalar variable')
-        return Aval (self.domain, self.data[index])
+        return Approximate (self.domain, self.data[index])
 
     def __setitem__ (self, index, value):
         if self._scalar:
             raise TypeError ('object does not support item assignment')
-        value = Aval.from_other (value, copy=False)
+        value = Approximate.from_other (value, copy=False)
         self.domain = Domain.union[_ordpair (self.domain, value.domain)]
         self.data[index] = value.data
 
@@ -601,11 +602,11 @@ class Aval (object):
 
     def __unicode__ (self):
         if self._scalar:
-            datum = Aval._str_one (self.data)
+            datum = Approximate._str_one (self.data)
             return datum + ' <%s %s scalar>' % (Domain.names[self.domain],
                                                 self.__class__.__name__)
         else:
-            text = np.array2string (self.data, formatter={'all': Aval._str_one})
+            text = np.array2string (self.data, formatter={'all': Approximate._str_one})
             return text + ' <%s %s %r-array>' % (Domain.names[self.domain],
                                                  self.__class__.__name__,
                                                  self.shape)
@@ -630,7 +631,7 @@ class Aval (object):
         where {float} stands for a floating-point number.
         """
         domain = Domain.normalize (domain)
-        rv = Aval (domain, ())
+        rv = Approximate (domain, ())
 
         if text[0] == '<':
             rv.data['kind'] = Kind.upper
@@ -664,13 +665,13 @@ class Aval (object):
         return rv
 
 
-def _aval_unary_absolute (q):
+def _approximate_unary_absolute (q):
     return q.copy ()._inplace_abs ()
 
-def _aval_unary_exp (q):
+def _approximate_unary_exp (q):
     return q.copy ()._inplace_exp ()
 
-def _aval_unary_log (q):
+def _approximate_unary_log (q):
     domain = Domain.anything
     data = q.data.copy ()
 
@@ -686,25 +687,25 @@ def _aval_unary_log (q):
         data['u'][m] = data['u'][m] / data['x'][m]
         data['x'][m] = np.log (data['x'][m])
 
-    return Aval (domain, data)
+    return Approximate (domain, data)
 
-def _aval_unary_log10 (q):
-    return _aval_unary_log (q) / np.log (10)
+def _approximate_unary_log10 (q):
+    return _approximate_unary_log (q) / np.log (10)
 
-def _aval_unary_negative (q):
+def _approximate_unary_negative (q):
     return q.copy ()._inplace_negate ()
 
-def _aval_unary_reciprocal (q):
+def _approximate_unary_reciprocal (q):
     return q.copy ()._inplace_reciprocate ()
 
 
-aval_unary_math = {
-    'absolute': _aval_unary_absolute,
-    'exp': _aval_unary_exp,
-    'log10': _aval_unary_log,
-    'log': _aval_unary_log,
-    'negative': _aval_unary_negative,
-    'reciprocal': _aval_unary_reciprocal,
+approximate_unary_math = {
+    'absolute': _approximate_unary_absolute,
+    'exp': _approximate_unary_exp,
+    'log10': _approximate_unary_log,
+    'log': _approximate_unary_log,
+    'negative': _approximate_unary_negative,
+    'reciprocal': _approximate_unary_reciprocal,
 }
 
 
@@ -912,8 +913,8 @@ basic_unary_math = {
 
 
 def _dispatch_unary_math (name, value):
-    if isinstance (value, Aval):
-        table = aval_unary_math
+    if isinstance (value, Approximate):
+        table = approximate_unary_math
     elif try_asarray (value) is not None:
         table = basic_unary_math
     else:

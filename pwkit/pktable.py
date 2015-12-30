@@ -307,9 +307,9 @@ class _PKTableColumnsHelper (object):
             arrayish_factory = None
             arrayish_data = None
 
-            from .msmt import Aval
-            if isinstance (sval, Aval):
-                arrayish_factory = AvalColumn._new_from_data
+            from .msmt import Approximate
+            if isinstance (sval, Approximate):
+                arrayish_factory = ApproximateColumn._new_from_data
                 arrayish_data = sval
 
             # Nothing specific worked. Last-ditch effort: np.asarray(). This
@@ -813,9 +813,9 @@ class ScalarColumn (PKTableAlgebraColumnABC):
         self._data[key] = value
 
 
-class AvalColumn (PKTableAlgebraColumnABC):
+class ApproximateColumn (PKTableAlgebraColumnABC):
     _data = None
-    "The actual Aval data."
+    "The actual Approximate data."
 
     def __init__ (self, len, domain='anything', sample_dtype=np.double, _data=None):
         if _data is not None:
@@ -825,10 +825,10 @@ class AvalColumn (PKTableAlgebraColumnABC):
         try:
             len = int (len)
         except Exception:
-            raise ValueError ('AvalColumn length must be an integer')
+            raise ValueError ('ApproximateColumn length must be an integer')
 
-        from .msmt import Aval
-        self._data = Aval (domain, (len,), sample_dtype=sample_dtype)
+        from .msmt import Approximate
+        self._data = Approximate (domain, (len,), sample_dtype=sample_dtype)
 
 
     @classmethod
@@ -845,8 +845,8 @@ class AvalColumn (PKTableAlgebraColumnABC):
 
 
     def _repr_single_item (self, idx):
-        from .msmt import Aval
-        return Aval._str_one (self._data[idx].data)
+        from .msmt import Approximate
+        return Approximate._str_one (self._data[idx].data)
 
 
     def _coldesc_for_repr (self):
@@ -855,7 +855,7 @@ class AvalColumn (PKTableAlgebraColumnABC):
         return '%s %s' % (Domain.names[self._data.domain], self.__class__.__name__)
 
 
-    # Emulating Aval attributes.
+    # Emulating Approximate attributes.
 
     @property
     def domain (self):
