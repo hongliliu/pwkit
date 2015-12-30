@@ -650,6 +650,9 @@ class _PKTableSlicedColumnView (PKTableColumnABC):
     def _set_index (self, idx, value):
         self._parent._set_index (self._start + self._stride * idx, value)
 
+    def _repr_single_item (self, idx):
+        return self._parent._repr_single_item (self._start + self._stride * idx)
+
     def _coldesc_for_repr (self):
         return 'slice view of %s' % self._parent._coldesc_for_repr ()
 
@@ -672,6 +675,9 @@ class _PKTableFancyIndexedColumnView (PKTableColumnABC):
 
     def _set_index (self, idx, value):
         self._parent._set_index (self._index[idx], value)
+
+    def _repr_single_item (self, idx):
+        return self._parent._repr_single_item (self._index[idx])
 
     def _coldesc_for_repr (self):
         return 'fancy-index view of %s' % self._parent._coldesc_for_repr ()
