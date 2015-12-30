@@ -259,14 +259,15 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, object)):
     def _inplace_exp (self):
         raise NotImplementedError ()
 
+    def _inplace_fill_unity (self):
+        raise NotImplementedError ()
+
     def __iadd__ (self, other):
         raise NotImplementedError ()
 
     def __imul__ (self, other):
         raise NotImplementedError ()
 
-    def __ipow__ (self, other, modulo=None):
-        raise NotImplementedError ()
 
 
     # Algebra -- given in-place operations, we can do the rest generically.
@@ -325,7 +326,44 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, object)):
     __idiv__ = __itruediv__
     __rdiv__ = __rtruediv__
 
-    def __pow__ (self, other, module=None):
+    def __ipow__ (self, other, modulo=None):
+        if modulo is not None:
+            raise ValueError ('powmod behavior forbidden with measurements')
+
+        try:
+            v = float (other)
+        except TypeError:
+            raise ValueError ('measurements can only be exponentiated by exact values')
+
+        if v == 0:
+            self._inplace_fill_unity ()
+            return self
+
+        reciprocate = (v < 0)
+        if reciprocate:
+            v = -v
+
+        i = int (v)
+
+        if v != i:
+            # A fractional exponent.
+            self._inplace_log ()
+            self *= v
+            self._inplace_exp ()
+        else:
+            # An integer exponent: implement as a series of multiplies, so
+            # that we can work with negative values (which the log/exp
+            # approach can't). Not the most efficient, but reduces the chance
+            # for bugs.
+            orig = self.copy ()
+            for _ in range (i - 1):
+                self *= orig
+
+        if reciprocate:
+            self._inplace_reciprocate ()
+        return self
+
+    def __pow__ (self, other, modulo=None):
         rv = self.copy ()
         rv **= other
         return rv
@@ -599,9 +637,9 @@ class Sampled (MeasurementABC):
         np.log (self.data['samples'], self.data['samples'])
 
         if self.domain != Domain.nonnegative:
-            bad = np.any (~np.isfinite (self.data['samples']), axis=-1) | (self.data['kind'] == Kind.upper)
-            self.data['kind'][bad] = Kind.undef
-            self.data['samples'][bad,:] = np.nan
+            undef = np.any (~np.isfinite (self.data['samples']), axis=-1) | (self.data['kind'] == Kind.upper)
+            self.data['kind'][undef] = Kind.undef
+            self.data['samples'][undef,:] = np.nan
 
         self.domain = Domain.anything
         return self
@@ -611,6 +649,14 @@ class Sampled (MeasurementABC):
         self.domain = Domain.nonnegative
         # kind is unchanged
         np.exp (self.data['samples'], self.data['samples'])
+        return self
+
+
+    def _inplace_fill_unity (self):
+        self.domain = Domain.nonnegative
+        defined = (self.data['kind'] != Kind.undef)
+        self.data['kind'][defined] = Kind.msmt
+        self.data['samples'][defined] = 1
         return self
 
 
@@ -644,10 +690,6 @@ class Sampled (MeasurementABC):
 
         self.data['samples'] *= other.data['samples']
         return self
-
-
-    def __ipow__ (self, other, modulo=None):
-        raise NotImplementedError ()
 
 
     # Stringification
@@ -849,6 +891,15 @@ class Approximate (MeasurementABC):
         return self
 
 
+    def _inplace_fill_unity (self):
+        self.domain = Domain.nonnegative
+        defined = (self.data['kind'] != Kind.undef)
+        self.data['kind'][defined] = Kind.msmt
+        self.data['x'][defined] = 1
+        self.data['u'][defined] = 0
+        return self
+
+
     def __iadd__ (self, other):
         other = self.from_other (other, copy=False)
         self.domain = Domain.add[_ordpair (self.domain, other.domain)]
@@ -882,56 +933,6 @@ class Approximate (MeasurementABC):
         self.data['x'] *= other.data['x']
         self.data['u'] = np.sqrt ((self.data['u'] * other.data['x'])**2 +
                                   (other.data['u'] * self.data['x'])**2)
-        return self
-
-
-    def __ipow__ (self, other, modulo=None):
-        if modulo is not None:
-            raise ValueError ('powmod behavior forbidden with Approximates')
-
-        try:
-            v = float (other)
-        except TypeError:
-            raise ValueError ('Approximates can only be exponentiated by exact values')
-
-        if v == 0:
-            self.domain = Domain.nonnegative
-            defined = (self.data['kind'] != Kind.undef)
-            self.data['kind'][defined] = Kind.msmt
-            self.data['x'][defined] = 1
-            self.data['u'][defined] = 0
-            return self
-
-        reciprocate = (v < 0)
-        if reciprocate:
-            v = -v
-
-        i = int (v)
-
-        if v != i:
-            # For us, fractional powers are only defined on positive numbers,
-            # which gives us a fairly small number of valid cases to worry
-            # about.
-            self.data['x'] **= v
-            self.data['u'] *= v * np.abs (self.data['x'])**(v - 1)
-
-            if self.domain != Domain.nonnegative:
-                undef = (self.data['kind'] == Kind.upper) | (self.data['x'] < 0)
-                self.data['kind'][undef] = Kind.undef
-                self.data['x'][undef] = np.nan
-                self.data['u'][undef] = 0.
-        else:
-            # We can deal with integer exponentiation as a series of
-            # multiplies. Not the most efficient, but reduces the chance for
-            # bugs. However, we have to correct the uncertainty since our naive
-            # uncertainty approach doesn't take into account correlations.
-            orig = self.copy ()
-            for _ in range (i - 1):
-                self *= orig
-            self.data['u'] /= np.sqrt (i)
-
-        if reciprocate:
-            self._inplace_reciprocate ()
         return self
 
 
