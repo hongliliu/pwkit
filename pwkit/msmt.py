@@ -17,13 +17,11 @@ MeasurementABC
 sampled_n_samples
 SampledDtypeGenerator
 get_sampled_dtype
-make_sampled_data
 Sampled
 sampled_unary_math
 
 ApproximateDtypeGenerator
 get_approximate_dtype
-make_approximate_data
 Approximate
 approximate_unary_math
 
@@ -489,12 +487,6 @@ class SampledDtypeGenerator (object):
 
 get_sampled_dtype = SampledDtypeGenerator ()
 
-def make_sampled_data (kinds, samples):
-    data = np.empty (kinds.shape, dtype=get_sampled_dtype (samples.dtype))
-    data['kind'] = kinds
-    data['samples'] = samples
-    return data
-
 
 class Sampled (MeasurementABC):
     """An empirical uncertain value, represented by samples.
@@ -726,14 +718,6 @@ class ApproximateDtypeGenerator (object):
         return dtype
 
 get_approximate_dtype = ApproximateDtypeGenerator ()
-
-
-def make_approximate_data (kind, x, u):
-    data = np.empty (kind.shape, dtype=get_approximate_dtype (x.dtype))
-    data['kind'] = kind
-    data['x'] = x
-    data['u'] = u
-    return data
 
 
 class Approximate (MeasurementABC):
