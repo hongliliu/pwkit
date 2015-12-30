@@ -14,7 +14,7 @@ aval_unary_math
 basic_unary_math
 Domain
 get_aval_dtype
-Kinds
+Kind
 make_aval_data
 
 absolute
@@ -110,7 +110,7 @@ def _all_in_domain (data, domain):
 
 
 @enumeration
-class Kinds (object):
+class Kind (object):
     undef = 0
     msmt = 1
     upper = 2
@@ -120,7 +120,7 @@ class Kinds (object):
 
     @classmethod
     def check (cls, kinds):
-        if not np.all ((kinds >= Kinds.undef) & (kinds <= Kinds.lower)):
+        if not np.all ((kinds >= Kind.undef) & (kinds <= Kind.lower)):
             raise ValueError ('illegal Aval kind(s) %r' % kinds)
         return kinds
 
@@ -219,7 +219,7 @@ class Aval (object):
 
         if isinstance (shape_or_data, (tuple,) + six.integer_types):
             self.data = np.empty (shape_or_data, dtype=get_aval_dtype (sample_dtype))
-            self.data['kind'].fill (Kinds.undef)
+            self.data['kind'].fill (Kind.undef)
         elif isinstance (shape_or_data, (np.ndarray, np.void)):
             # Scalars end up as the `np.void` type. It's hard to check the
             # array dtype thoroughly but let's do this:
@@ -261,12 +261,12 @@ class Aval (object):
             else:
                 domain = Domain.anything
 
-        return Aval.from_arrays (domain, Kinds.msmt, v, 0)
+        return Aval.from_arrays (domain, Kind.msmt, v, 0)
 
     @staticmethod
     def from_arrays (domain, kind, x, u):
         domain = Domain.normalize (domain)
-        Kinds.check (kind)
+        Kind.check (kind)
         if not _all_in_domain (x, domain):
             raise ValueError ('illegal Aval x initializer: data %r do not lie in '
                               'stated domain' % x)
@@ -320,7 +320,7 @@ class Aval (object):
 
     def _inplace_negate (self):
         self.domain = Domain.negate[self.domain]
-        self.data['kind'] = Kinds.negate[self.data['kind']]
+        self.data['kind'] = Kind.negate[self.data['kind']]
         np.negative (self.data['x'], self.data['x'])
         # uncertainty unchanged.
         return self
@@ -336,7 +336,7 @@ class Aval (object):
 
     def _inplace_reciprocate (self):
         # domain unchanged
-        self.data['kind'] = Kinds.reciprocal[self.data['kind']]
+        self.data['kind'] = Kind.reciprocal[self.data['kind']]
         # np.reciprocal() truncates integers, which we don't want
         np.divide (1, self.data['x'], self.data['x'])
         np.multiply (self.data['u'], self.data['x']**2, self.data['u'])
@@ -365,7 +365,7 @@ class Aval (object):
     def __iadd__ (self, other):
         other = Aval.from_other (other, copy=False)
         self.domain = Domain.add[_ordpair (self.domain, other.domain)]
-        self.data['kind'] = Kinds.add[Kinds.binop (self.data['kind'], other.data['kind'])]
+        self.data['kind'] = Kind.add[Kind.binop (self.data['kind'], other.data['kind'])]
         self.data['x'] += other.data['x']
         self.data['u'] = np.sqrt (self.data['u']**2 + other.data['u']**2)
         return self
@@ -397,15 +397,15 @@ class Aval (object):
 
         skind = self.data['kind'].copy ()
         snegate = (self.data['x'] < 0)
-        skind[snegate] = Kinds.negate[skind[snegate]]
+        skind[snegate] = Kind.negate[skind[snegate]]
 
         okind = other.data['kind'].copy ()
         onegate = (other.data['x'] < 0)
-        okind[onegate] = Kinds.negate[okind[onegate]]
+        okind[onegate] = Kind.negate[okind[onegate]]
 
-        self.data['kind'] = Kinds.posmul[Kinds.binop (skind, okind)]
+        self.data['kind'] = Kind.posmul[Kind.binop (skind, okind)]
         nnegate = snegate ^ onegate
-        self.data['kind'][nnegate] = Kinds.negate[self.data['kind'][nnegate]]
+        self.data['kind'][nnegate] = Kind.negate[self.data['kind'][nnegate]]
 
         # Besides the kinds, this is straightforward:
 
@@ -452,8 +452,8 @@ class Aval (object):
 
         if v == 0:
             self.domain = Domain.nonnegative
-            defined = (self.data['kind'] != Kinds.undef)
-            self.data['kind'][defined] = Kinds.msmt
+            defined = (self.data['kind'] != Kind.undef)
+            self.data['kind'][defined] = Kind.msmt
             self.data['x'][defined] = 1
             self.data['u'][defined] = 0
             return self
@@ -472,8 +472,8 @@ class Aval (object):
             self.data['u'] *= v * np.abs (self.data['x'])**(v - 1)
 
             if self.domain != Domain.nonnegative:
-                undef = (self.data['kind'] == Kinds.upper) | (self.data['x'] < 0)
-                self.data['kind'][undef] = Kinds.undef
+                undef = (self.data['kind'] == Kind.upper) | (self.data['x'] < 0)
+                self.data['kind'][undef] = Kind.undef
                 self.data['x'][undef] = np.nan
                 self.data['u'][undef] = 0.
         else:
@@ -541,13 +541,13 @@ class Aval (object):
         TODO: arguments adjusting the behavior.
 
         """
-        rv = (((self.data['kind'] == Kinds.msmt) | (self.data['kind'] == Kinds.upper))
+        rv = (((self.data['kind'] == Kind.msmt) | (self.data['kind'] == Kind.upper))
               & (self.data['x'] < other))
 
         if other > 0 and self.domain == Domain.nonpositive:
             # This is the only way that a lower limit can result in True in
             # the strict definition.
-            rv[self.data['kind'] == Kinds.lower] = True
+            rv[self.data['kind'] == Kind.lower] = True
 
         if self._scalar:
             rv = rv[0]
@@ -555,11 +555,11 @@ class Aval (object):
 
     def gt (self, other):
         """Note that cannot simply invert `lt` since we have to handle undefs properly."""
-        rv = (((self.data['kind'] == Kinds.msmt) | (self.data['kind'] == Kinds.lower))
+        rv = (((self.data['kind'] == Kind.msmt) | (self.data['kind'] == Kind.lower))
               & (self.data['x'] > other))
 
         if other < 0 and self.domain == Domain.nonnegative:
-            rv[self.data['kind'] == Kinds.upper] = True
+            rv[self.data['kind'] == Kind.upper] = True
 
         if self._scalar:
             rv = rv[0]
@@ -589,11 +589,11 @@ class Aval (object):
 
         # TODO: better control of precision
 
-        if k == Kinds.undef:
+        if k == Kind.undef:
             return '?'
-        elif k == Kinds.lower:
+        elif k == Kind.lower:
             return '>%.4f' % datum['x']
-        elif k == Kinds.upper:
+        elif k == Kind.upper:
             return '<%.4f' % datum['x']
 
         return '%.3fpm%.3f' % (datum['x'], datum['u'])
@@ -633,19 +633,19 @@ class Aval (object):
         rv = Aval (domain, ())
 
         if text[0] == '<':
-            rv.data['kind'] = Kinds.upper
+            rv.data['kind'] = Kind.upper
             rv.data['x'] = float (text[1:])
             rv.data['u'] = 0
         elif text[0] == '>':
-            rv.data['kind'] = Kinds.lower
+            rv.data['kind'] = Kind.lower
             rv.data['x'] = float (text[1:])
             rv.data['u'] = 0
         elif text == '?':
-            rv.data['kind'] = Kinds.undef
+            rv.data['kind'] = Kind.undef
             rv.data['x'] = np.nan
             rv.data['u'] = np.nan
         else:
-            rv.data['kind'] = Kinds.msmt
+            rv.data['kind'] = Kind.msmt
             pieces = text.split ('pm', 1)
             rv.data['x'] = float (pieces[0])
 
@@ -654,7 +654,7 @@ class Aval (object):
             else:
                 rv.data['u'] = float (pieces[1])
 
-        if rv.data['kind'] != Kinds.undef:
+        if rv.data['kind'] != Kind.undef:
             if not _all_in_domain (rv.data['x'], rv.domain):
                 raise ValueError ('value of %s is not in stated domain %s' %
                                   (text, Domain.names[domain]))
@@ -678,8 +678,8 @@ def _aval_unary_log (q):
         np.divide (data['u'], data['x'], data['u'])
         np.log (data['x'], data['x'])
     else:
-        m = (data['x'] <= 0) | (data['kind'] == Kinds.upper) | (data['kind'] == Kinds.undef)
-        data['kind'][m] = Kinds.undef
+        m = (data['x'] <= 0) | (data['kind'] == Kind.upper) | (data['kind'] == Kind.undef)
+        data['kind'][m] = Kind.undef
         data['u'][m] = np.nan
         data['x'][m] = np.nan
         m = ~m
@@ -756,7 +756,7 @@ class Uval (object):
 
         if isinstance (shape_or_data, (tuple,) + six.integer_types):
             self.data = np.empty (shape_or_data, dtype=get_uval_dtype (sample_dtype))
-            self.data['kind'].fill (Kinds.undef)
+            self.data['kind'].fill (Kind.undef)
         elif isinstance (shape_or_data, np.ndarray):
             # It's hard to check the array dtype thoroughly but let's do this:
             try:
@@ -774,12 +774,12 @@ class Uval (object):
                 return v.copy ()
             return v
 
-        return Uval.from_fixed (Domain.anything, Kinds.msmt, v)
+        return Uval.from_fixed (Domain.anything, Kind.msmt, v)
 
     @staticmethod
     def from_fixed (domain, kind, v):
         domain = Domain.normalize (domain)
-        Kinds.check (kind)
+        Kind.check (kind)
         if not _all_in_domain (v, domain):
             raise ValueError ('illegal Uval initializer: data %r do not lie in '
                               'stated domain' % v)
@@ -797,7 +797,7 @@ class Uval (object):
             raise ValueError ('std must be positive')
 
         r = Uval (domain, shape)
-        r.data['kind'].fill (Kinds.msmt)
+        r.data['kind'].fill (Kind.msmt)
         r.data['samples'] = np.random.normal (mean, std, shape+(n_samples,))
         return r
 
@@ -830,14 +830,14 @@ class Uval (object):
     def __add__ (self, other):
         other = Uval.from_other (other, copy=False)
         dom = Domain.add[_ordpair (self.domain, other.domain)]
-        kind = Kinds.add[Kinds.binop (self.data['kind'], other.data['kind'])]
+        kind = Kind.add[Kind.binop (self.data['kind'], other.data['kind'])]
         tot = self.data['samples'] + other.data['samples']
         return Uval (dom, make_uval_data (kind, tot))
 
     def __iadd__ (self, other):
         other = Uval.from_other (other, copy=False)
         self.domain = Domain.add[_ordpair (self.domain, other.domain)]
-        self.data['kind'] = Kinds.add[Kinds.binop (self.data['kind'], other.data['kind'])]
+        self.data['kind'] = Kind.add[Kind.binop (self.data['kind'], other.data['kind'])]
         self.data['samples'] += other.data['samples']
         return self
 
@@ -862,7 +862,7 @@ class Uval (object):
 def _uval_unary_negative (v):
     r = v.copy ()
     r.domain = Domain.negate[v.domain]
-    r.data['kind'] = Kinds.negate[v.data['kind']]
+    r.data['kind'] = Kind.negate[v.data['kind']]
     np.negative (r.data['samples'], r.data['samples'])
     return r
 
@@ -873,9 +873,9 @@ def _uval_unary_absolute (v):
     np.absolute (r.data['samples'], r.data['samples'])
 
     assert False, 'figure out what to do here'
-    ##i = np.nonzero (r.data['kind'] == Kinds.past_zero)
+    ##i = np.nonzero (r.data['kind'] == Kind.past_zero)
     ##r.data['samples'][i] = 0.
-    ##r.data['kind'][i] = Kinds.to_inf
+    ##r.data['kind'][i] = Kind.to_inf
 
     return r
 
