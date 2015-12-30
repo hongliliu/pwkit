@@ -12,7 +12,7 @@ Aval
 AvalDtypeGenerator
 aval_unary_math
 basic_unary_math
-Domains
+Domain
 get_aval_dtype
 Kinds
 make_aval_data
@@ -47,7 +47,7 @@ from .numutil import broadcastize, try_asarray
 
 
 @enumeration
-class Domains (object):
+class Domain (object):
     anything = 0
     nonnegative = 1
     nonpositive = 2
@@ -62,7 +62,7 @@ class Domains (object):
 
         """
         try:
-            dval = Domains.names.index (domain)
+            dval = Domain.names.index (domain)
         except ValueError:
             try:
                 dval = int (domain)
@@ -94,18 +94,18 @@ class Domains (object):
 
 
 def _ordpair (v1, v2):
-    """For use with Domains data tables."""
+    """For use with Domain data tables."""
     if v1 > v2:
         return (v2, v1)
     return (v1, v2)
 
 
 def _all_in_domain (data, domain):
-    if domain == Domains.anything:
+    if domain == Domain.anything:
         return True
-    if domain == Domains.nonnegative:
+    if domain == Domain.nonnegative:
         return np.all (data >= 0)
-    if domain == Domains.nonpositive:
+    if domain == Domain.nonpositive:
         return np.all (data <= 0)
 
 
@@ -215,7 +215,7 @@ class Aval (object):
     __slots__ = ('domain', 'data', '_scalar')
 
     def __init__ (self, domain, shape_or_data=None, sample_dtype=np.double):
-        self.domain = Domains.normalize (domain)
+        self.domain = Domain.normalize (domain)
 
         if isinstance (shape_or_data, (tuple,) + six.integer_types):
             self.data = np.empty (shape_or_data, dtype=get_aval_dtype (sample_dtype))
@@ -248,24 +248,24 @@ class Aval (object):
             return v
 
         # TODO: handle other value types. If we're here, we just have
-        # some array of floats. Domains can only get less restrictive when
+        # some array of floats. Domain can only get less restrictive when
         # we do math on them, so it's OK to choose the best domain we can
         # given the data we have.
 
         v = np.asarray (v)
         if domain is None:
             if np.all (v >= 0):
-                domain = Domains.nonnegative
+                domain = Domain.nonnegative
             elif np.all (v <= 0):
-                domain = Domains.nonpositive
+                domain = Domain.nonpositive
             else:
-                domain = Domains.anything
+                domain = Domain.anything
 
         return Aval.from_arrays (domain, Kinds.msmt, v, 0)
 
     @staticmethod
     def from_arrays (domain, kind, x, u):
-        domain = Domains.normalize (domain)
+        domain = Domain.normalize (domain)
         Kinds.check (kind)
         if not _all_in_domain (x, domain):
             raise ValueError ('illegal Aval x initializer: data %r do not lie in '
@@ -277,7 +277,7 @@ class Aval (object):
         r.data['x'] = x
         r.data['u'] = u
 
-        if not _all_in_domain (r.data['u'], Domains.nonnegative):
+        if not _all_in_domain (r.data['u'], Domain.nonnegative):
             raise ValueError ('illegal Aval u initializer: some values %r '
                               'are negative' % u)
 
@@ -319,7 +319,7 @@ class Aval (object):
     # Math.
 
     def _inplace_negate (self):
-        self.domain = Domains.negate[self.domain]
+        self.domain = Domain.negate[self.domain]
         self.data['kind'] = Kinds.negate[self.data['kind']]
         np.negative (self.data['x'], self.data['x'])
         # uncertainty unchanged.
@@ -327,7 +327,7 @@ class Aval (object):
 
 
     def _inplace_abs (self):
-        self.domain = Domains.nonnegative
+        self.domain = Domain.nonnegative
         np.absolute (self.data['x'], self.data['x'])
         # uncertainty unchanged
         assert False, 'figure out what to do here'
@@ -344,7 +344,7 @@ class Aval (object):
 
 
     def _inplace_exp (self):
-        self.domain = Domains.nonnegative
+        self.domain = Domain.nonnegative
         # kind is unchanged
         np.exp (self.data['x'], self.data['x'])
         np.multiply (self.data['u'], self.data['x'], self.data['u'])
@@ -364,7 +364,7 @@ class Aval (object):
 
     def __iadd__ (self, other):
         other = Aval.from_other (other, copy=False)
-        self.domain = Domains.add[_ordpair (self.domain, other.domain)]
+        self.domain = Domain.add[_ordpair (self.domain, other.domain)]
         self.data['kind'] = Kinds.add[Kinds.binop (self.data['kind'], other.data['kind'])]
         self.data['x'] += other.data['x']
         self.data['u'] = np.sqrt (self.data['u']**2 + other.data['u']**2)
@@ -390,7 +390,7 @@ class Aval (object):
 
     def __imul__ (self, other):
         other = Aval.from_other (other, copy=False)
-        self.domain = Domains.mul[_ordpair (self.domain, other.domain)]
+        self.domain = Domain.mul[_ordpair (self.domain, other.domain)]
 
         # There's probably a simpler way to make sure that we get the limit directions
         # correct, but this ought to at least work.
@@ -451,7 +451,7 @@ class Aval (object):
             raise ValueError ('Avals can only be exponentiated by exact values')
 
         if v == 0:
-            self.domain = Domains.nonnegative
+            self.domain = Domain.nonnegative
             defined = (self.data['kind'] != Kinds.undef)
             self.data['kind'][defined] = Kinds.msmt
             self.data['x'][defined] = 1
@@ -471,7 +471,7 @@ class Aval (object):
             self.data['x'] **= v
             self.data['u'] *= v * np.abs (self.data['x'])**(v - 1)
 
-            if self.domain != Domains.nonnegative:
+            if self.domain != Domain.nonnegative:
                 undef = (self.data['kind'] == Kinds.upper) | (self.data['x'] < 0)
                 self.data['kind'][undef] = Kinds.undef
                 self.data['x'][undef] = np.nan
@@ -544,7 +544,7 @@ class Aval (object):
         rv = (((self.data['kind'] == Kinds.msmt) | (self.data['kind'] == Kinds.upper))
               & (self.data['x'] < other))
 
-        if other > 0 and self.domain == Domains.nonpositive:
+        if other > 0 and self.domain == Domain.nonpositive:
             # This is the only way that a lower limit can result in True in
             # the strict definition.
             rv[self.data['kind'] == Kinds.lower] = True
@@ -558,7 +558,7 @@ class Aval (object):
         rv = (((self.data['kind'] == Kinds.msmt) | (self.data['kind'] == Kinds.lower))
               & (self.data['x'] > other))
 
-        if other < 0 and self.domain == Domains.nonnegative:
+        if other < 0 and self.domain == Domain.nonnegative:
             rv[self.data['kind'] == Kinds.upper] = True
 
         if self._scalar:
@@ -577,7 +577,7 @@ class Aval (object):
         if self._scalar:
             raise TypeError ('object does not support item assignment')
         value = Aval.from_other (value, copy=False)
-        self.domain = Domains.union[_ordpair (self.domain, value.domain)]
+        self.domain = Domain.union[_ordpair (self.domain, value.domain)]
         self.data[index] = value.data
 
 
@@ -602,11 +602,11 @@ class Aval (object):
     def __unicode__ (self):
         if self._scalar:
             datum = Aval._str_one (self.data)
-            return datum + ' <%s %s scalar>' % (Domains.names[self.domain],
+            return datum + ' <%s %s scalar>' % (Domain.names[self.domain],
                                                 self.__class__.__name__)
         else:
             text = np.array2string (self.data, formatter={'all': Aval._str_one})
-            return text + ' <%s %s %r-array>' % (Domains.names[self.domain],
+            return text + ' <%s %s %r-array>' % (Domain.names[self.domain],
                                                  self.__class__.__name__,
                                                  self.shape)
 
@@ -618,7 +618,7 @@ class Aval (object):
 
 
     @staticmethod
-    def parse (text, domain=Domains.anything):
+    def parse (text, domain=Domain.anything):
         """This only handles scalar values. Accepted formats are:
 
         "?"
@@ -629,7 +629,7 @@ class Aval (object):
 
         where {float} stands for a floating-point number.
         """
-        domain = Domains.normalize (domain)
+        domain = Domain.normalize (domain)
         rv = Aval (domain, ())
 
         if text[0] == '<':
@@ -657,7 +657,7 @@ class Aval (object):
         if rv.data['kind'] != Kinds.undef:
             if not _all_in_domain (rv.data['x'], rv.domain):
                 raise ValueError ('value of %s is not in stated domain %s' %
-                                  (text, Domains.names[domain]))
+                                  (text, Domain.names[domain]))
             if rv.data['u'] < 0:
                 raise ValueError ('uncertainty of %s is negative' % text)
 
@@ -671,10 +671,10 @@ def _aval_unary_exp (q):
     return q.copy ()._inplace_exp ()
 
 def _aval_unary_log (q):
-    domain = Domains.anything
+    domain = Domain.anything
     data = q.data.copy ()
 
-    if q.domain == Domains.nonnegative:
+    if q.domain == Domain.nonnegative:
         np.divide (data['u'], data['x'], data['u'])
         np.log (data['x'], data['x'])
     else:
@@ -752,7 +752,7 @@ class Uval (object):
     __slots__ = ('domain', 'data')
 
     def __init__ (self, domain, shape_or_data=None, sample_dtype=np.double):
-        self.domain = Domains.normalize (domain)
+        self.domain = Domain.normalize (domain)
 
         if isinstance (shape_or_data, (tuple,) + six.integer_types):
             self.data = np.empty (shape_or_data, dtype=get_uval_dtype (sample_dtype))
@@ -774,11 +774,11 @@ class Uval (object):
                 return v.copy ()
             return v
 
-        return Uval.from_fixed (Domains.anything, Kinds.msmt, v)
+        return Uval.from_fixed (Domain.anything, Kinds.msmt, v)
 
     @staticmethod
     def from_fixed (domain, kind, v):
-        domain = Domains.normalize (domain)
+        domain = Domain.normalize (domain)
         Kinds.check (kind)
         if not _all_in_domain (v, domain):
             raise ValueError ('illegal Uval initializer: data %r do not lie in '
@@ -791,8 +791,8 @@ class Uval (object):
         return r
 
     @staticmethod
-    def from_norm (mean, std, shape=(), domain=Domains.anything):
-        domain = Domains.normalize (domain)
+    def from_norm (mean, std, shape=(), domain=Domain.anything):
+        domain = Domain.normalize (domain)
         if std < 0:
             raise ValueError ('std must be positive')
 
@@ -829,14 +829,14 @@ class Uval (object):
 
     def __add__ (self, other):
         other = Uval.from_other (other, copy=False)
-        dom = Domains.add[_ordpair (self.domain, other.domain)]
+        dom = Domain.add[_ordpair (self.domain, other.domain)]
         kind = Kinds.add[Kinds.binop (self.data['kind'], other.data['kind'])]
         tot = self.data['samples'] + other.data['samples']
         return Uval (dom, make_uval_data (kind, tot))
 
     def __iadd__ (self, other):
         other = Uval.from_other (other, copy=False)
-        self.domain = Domains.add[_ordpair (self.domain, other.domain)]
+        self.domain = Domain.add[_ordpair (self.domain, other.domain)]
         self.data['kind'] = Kinds.add[Kinds.binop (self.data['kind'], other.data['kind'])]
         self.data['samples'] += other.data['samples']
         return self
@@ -855,13 +855,13 @@ class Uval (object):
 
     def __mul__ (self, other):
         other = Uval.from_other (other, copy=False)
-        dom = Domains.mul[_ordpair (self.domain, other.domain)]
+        dom = Domain.mul[_ordpair (self.domain, other.domain)]
 
 
 
 def _uval_unary_negative (v):
     r = v.copy ()
-    r.domain = Domains.negate[v.domain]
+    r.domain = Domain.negate[v.domain]
     r.data['kind'] = Kinds.negate[v.data['kind']]
     np.negative (r.data['samples'], r.data['samples'])
     return r
@@ -869,7 +869,7 @@ def _uval_unary_negative (v):
 
 def _uval_unary_absolute (v):
     r = v.copy ()
-    r.domain = Domains.nonnegative
+    r.domain = Domain.nonnegative
     np.absolute (r.data['samples'], r.data['samples'])
 
     assert False, 'figure out what to do here'

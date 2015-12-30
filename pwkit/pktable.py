@@ -850,9 +850,9 @@ class AvalColumn (PKTableAlgebraColumnABC):
 
 
     def _coldesc_for_repr (self):
-        from .msmt import Domains
+        from .msmt import Domain
 
-        return '%s %s' % (Domains.names[self._data.domain], self.__class__.__name__)
+        return '%s %s' % (Domain.names[self._data.domain], self.__class__.__name__)
 
 
     # Emulating Aval attributes.
@@ -863,8 +863,8 @@ class AvalColumn (PKTableAlgebraColumnABC):
 
     @domain.setter
     def domain (self, domain):
-        from .msmt import Domains
-        self._data.domain = Domains.normalize (domain)
+        from .msmt import Domain
+        self._data.domain = Domain.normalize (domain)
 
     @property
     def sample_dtype (self):
