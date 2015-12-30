@@ -586,6 +586,78 @@ class Sampled (MeasurementABC):
         np.negative (self.data['samples'], self.data['samples'])
         return self
 
+
+    def _inplace_abs (self):
+        self.domain = Domain.nonnegative
+        np.absolute (self.data['samples'], self.data['samples'])
+        assert False, 'figure out what to do here'
+        return self
+
+
+    def _inplace_reciprocate (self):
+        # domain is unchanged
+        self.data['kind'] = Kind.reciprocal[self.data['kind']]
+        # np.reciprocal() truncates integers, which we don't want
+        np.divide (1, self.data['samples'], self.data['samples'])
+        return self
+
+
+    def _inplace_log (self):
+        # kind is unchanged
+        np.log (self.data['samples'], self.data['samples'])
+
+        if self.domain != Domain.nonnegative:
+            bad = np.any (~np.isfinite (self.data['samples']), axis=-1) | (self.data['kind'] == Kind.upper)
+            self.data['kind'][bad] = Kind.undef
+            self.data['samples'][bad,:] = np.nan
+
+        self.domain = Domain.anything
+        return self
+
+
+    def _inplace_exp (self):
+        self.domain = Domain.nonnegative
+        # kind is unchanged
+        np.exp (self.data['samples'], self.data['samples'])
+        return self
+
+
+    def __iadd__ (self, other):
+        other = self.from_other (other, copy=False)
+        self.domain = Domain.add[_ordpair (self.domain, other.domain)]
+        # kind is unchanged
+        self.data['kind'] = Kind.add[Kind.binop (self.data['kind'], other.data['kind'])]
+        self.data['samples'] += other.data['samples']
+        return self
+
+
+    def __imul__ (self, other):
+        other = self.from_other (other, copy=False)
+        self.domain = Domain.mul[_ordpair (self.domain, other.domain)]
+
+        # There's probably a smarter way to make sure that we get the limit
+        # directions correct, but this ought to at least work.
+
+        skind = self.data['kind'].copy ()
+        snegate = ((skind == Kind.lower) | (skind == Kind.upper)) & (self.data['samples'][...,0] < 0)
+        skind[snegate] = Kind.negate[skind[snegate]]
+
+        okind = other.data['kind'].copy ()
+        onegate = ((okind == Kind.lower) | (okind == Kind.upper)) & (other.data['samples'][...,0] < 0)
+        okind[onegate] = Kind.negate[okind[onegate]]
+
+        self.data['kind'] = Kind.posmul[Kind.binop (skind, okind)]
+        nnegate = snegate ^ onegate
+        self.data['kind'][nnegate] = Kind.negate[self.data['kind'][nnegate]]
+
+        self.data['samples'] *= other.data['samples']
+        return self
+
+
+    def __ipow__ (self, other, modulo=None):
+        raise NotImplementedError ()
+
+
     # Stringification
 
     @staticmethod
