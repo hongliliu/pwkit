@@ -12,6 +12,8 @@ Domain
 
 Kind
 
+MeasurementABC
+
 sampled_n_samples
 SampledDtypeGenerator
 get_sampled_dtype
@@ -46,7 +48,7 @@ square
 tan
 ''').split ()
 
-import operator, six
+import abc, operator, six
 from six.moves import range
 import numpy as np
 
@@ -183,6 +185,222 @@ class Kind (object):
     ])
 
 
+class MeasurementABC (six.with_metaclass (abc.ABCMeta, object)):
+    """A an array of measurements that may be uncertain or limits.
+
+    """
+    __slots__ = ('domain', 'data', '_scalar')
+
+    @classmethod
+    def from_other (cls, v, copy=True, domain=None):
+        raise NotImplementedError ()
+
+    @classmethod
+    def _from_data (cls, domain, data):
+        """This default implementation assumes that __init__ has a _noalloc keyword
+        argument that leaves the new object essentially unfilled.
+
+        """
+        rv = cls (domain, _noalloc=True)
+        rv.data = data
+        rv._scalar = (rv.data.shape == ())
+        if rv._scalar:
+            rv.data = np.atleast_1d (rv.data)
+        return rv
+
+    def copy (self):
+        return self.__class__._from_data (self.domain, self.data.copy ())
+
+
+    # Basic array properties
+
+    @property
+    def shape (self):
+        if self._scalar:
+            return ()
+        return self.data.shape
+
+    @property
+    def ndim (self):
+        if self._scalar:
+            return 1
+        return self.data.ndim
+
+    @property
+    def size (self):
+        if self._scalar:
+            return 1
+        return self.data.size
+
+    def __len__ (self):
+        if self._scalar:
+            raise TypeError ('len() of unsized object')
+        return self.data.shape[0]
+
+
+    # Algebra -- in-place stubs
+
+    def _inplace_negate (self):
+        raise NotImplementedError ()
+
+    def _inplace_abs (self):
+        raise NotImplementedError ()
+
+    def _inplace_reciprocate (self):
+        raise NotImplementedError ()
+
+    def _inplace_exp (self):
+        raise NotImplementedError ()
+
+    def __iadd__ (self, other):
+        raise NotImplementedError ()
+
+    def __imul__ (self, other):
+        raise NotImplementedError ()
+
+    def __ipow__ (self, other, modulo=None):
+        raise NotImplementedError ()
+
+
+    # Algebra -- given in-place operations, we can do the rest generically.
+    # These of course can be overridden by subclasses if needed.
+
+    def __neg__ (self):
+        rv = self.copy ()
+        rv._inplace_negate ()
+        return rv
+
+    def __abs__ (self):
+        rv = self.copy ()
+        rv._inplace_abs ()
+        return rv
+
+    def __add__ (self, other):
+        rv = self.copy ()
+        rv += other
+        return rv
+
+    __radd__ = __add__
+
+    def __sub__ (self, other):
+        return self + (-other)
+
+    def __isub__ (self, other):
+        self += (-other)
+        return self
+
+    def __rsub__ (self, other):
+        return (-self) + other
+
+    def __mul__ (self, other):
+        rv = self.copy ()
+        rv *= other
+        return rv
+
+    __rmul__ = __mul__
+
+    def __itruediv__ (self, other):
+        self *= reciprocal (other)
+        return self
+
+    def __truediv__ (self, other):
+        rv = self.copy ()
+        rv /= other
+        return rv
+
+    def __rtruediv__ (self, other):
+        rv = self.copy ()
+        rv._inplace_reciprocate ()
+        rv *= other
+        return rv
+
+    __div__ = __truediv__
+    __idiv__ = __itruediv__
+    __rdiv__ = __rtruediv__
+
+    def __pow__ (self, other, module=None):
+        rv = self.copy ()
+        rv **= other
+        return rv
+
+    def __rpow__ (self, other, modulo=None):
+        """You might not think that this is common functionality, but it's important
+        for undoing logarithms; i.e. 10**x.
+
+        """
+        if modulo is not None:
+            raise ValueError ('powmod behavior forbidden with Measurements')
+
+        rv = self * log (other)
+        rv._inplace_exp ()
+        return rv
+
+
+    # Comparisons. We are conservative with the built-in operators.
+
+    def __lt__ (self, other):
+        raise TypeError ('Measurements do not have a well-defined "<" comparison')
+
+    def __le__ (self, other):
+        raise TypeError ('Measurements do not have a well-defined "<=" comparison')
+
+    def __gt__ (self, other):
+        raise TypeError ('Measurements do not have a well-defined ">" comparison')
+
+    def __ge__ (self, other):
+        raise TypeError ('Measurements do not have a well-defined ">=" comparison')
+
+    def __eq__ (self, other):
+        raise TypeError ('Measurements do not have a well-defined "==" comparison')
+
+    def __ne__ (self, other):
+        raise TypeError ('Measurements do not have a well-defined "!=" comparison')
+
+
+    # Indexing
+
+    def __getitem__ (self, index):
+        if self._scalar:
+            raise IndexError ('invalid index to scalar variable')
+        return self.__class__._from_data (self.domain, self.data[index])
+
+    def __setitem__ (self, index, value):
+        if self._scalar:
+            raise TypeError ('object does not support item assignment')
+        value = self.__class__.from_other (value, copy=False)
+        self.domain = Domain.union[_ordpair (self.domain, value.domain)]
+        self.data[index] = value.data
+
+
+    # Stringification
+
+    @staticmethod
+    def _str_one (datum):
+        raise NotImplementedError ()
+
+
+    def __unicode__ (self):
+        if self._scalar:
+            datum = self._str_one (self.data[0])
+            return datum + ' (%s %s scalar)' % (Domain.names[self.domain],
+                                                self.__class__.__name__)
+        else:
+            text = np.array2string (self.data, formatter={'all': self._str_one})
+            return text + ' (%s %s %r-array)' % (Domain.names[self.domain],
+                                                 self.__class__.__name__,
+                                                 self.shape)
+
+    __str__ = unicode_to_str
+
+    def __repr__ (self):
+        return str (self)
+
+
+    @classmethod
+    def parse (cls, text, domain=Domain.anything):
+        raise NotImplementedError ()
+
+
 # A Sampled measurement is one in which we propagate uncertainties the only
 # fully tractable way -- by approximating each measurement with a large number
 # of samples that are then processed vectorially. It's absurdly
@@ -220,32 +438,34 @@ def make_sampled_data (kinds, samples):
     return data
 
 
-class Sampled (object):
+class Sampled (MeasurementABC):
     """An empirical uncertain value, represented by samples.
 
     """
-    __slots__ = ('domain', 'data', '_scalar')
-
-    def __init__ (self, domain, shape_or_data=None, sample_dtype=np.double):
+    def __init__ (self, domain, shape=None, sample_dtype=np.double, _noalloc=False, _noinit=False):
         self.domain = Domain.normalize (domain)
 
-        if isinstance (shape_or_data, (tuple,) + six.integer_types):
-            self.data = np.empty (shape_or_data, dtype=get_sampled_dtype (sample_dtype))
-            self.data['kind'].fill (Kind.undef)
-        elif isinstance (shape_or_data, (np.ndarray, np.void)):
-            # Scalars end up as the `np.void` type. It's hard to check the
-            # array dtype thoroughly but let's do this:
-            try:
-                assert shape_or_data['kind'].dtype == np.uint8
-            except Exception:
-                raise ValueError ('illegal Sampled initializer array %r' % shape_or_data)
-            self.data = shape_or_data
-        else:
-            raise ValueError ('unrecognized Sampled initializer %r' % shape_or_data)
+        if _noalloc:
+            return # caller's responsibility to set `data` and `_scalar`
 
-    @staticmethod
-    def from_other (v, copy=True, domain=None):
-        if isinstance (v, Sampled):
+        # You can't index scalar values which makes it really annoying to
+        # implement a lot of our math. So we store scalars as shape (1,) and
+        # fake the outer parts.
+
+        self.data = np.empty (shape, dtype=get_sampled_dtype (sample_dtype))
+        self._scalar = (self.data.shape == ())
+
+        if self._scalar:
+            self.data = np.atleast_1d (self.data)
+
+        if _noinit:
+            return # caller's responsibility to fill `data`
+
+        self.data['kind'].fill (Kind.undef)
+
+    @classmethod
+    def from_other (cls, v, copy=True, domain=None):
+        if isinstance (v, cls):
             if copy:
                 return v.copy ()
             return v
@@ -264,10 +484,10 @@ class Sampled (object):
             else:
                 domain = Domain.anything
 
-        return Sampled.from_exact_array (domain, Kind.msmt, v)
+        return cls.from_exact_array (domain, Kind.msmt, v)
 
-    @staticmethod
-    def from_exact_array (domain, kind, v):
+    @classmethod
+    def from_exact_array (cls, domain, kind, v):
         domain = Domain.normalize (domain)
         Kind.check (kind)
         if not _all_in_domain (v, domain):
@@ -275,7 +495,7 @@ class Sampled (object):
                               'stated domain' % v)
 
         v = np.asarray (v)
-        r = Sampled (domain, v.shape)
+        r = cls (domain, v.shape)
         r.data['kind'] = kind
         r.data['samples'] = v[...,None]
         return r
@@ -291,39 +511,14 @@ class Sampled (object):
         r.data['samples'] = np.random.normal (mean, std, shape+(sampled_n_samples,))
         return r
 
-    def copy (self):
-        return self.__class__ (self.domain, self.data.copy ())
 
-    # Basic array properties
-
-    @property
-    def shape (self):
-        if self._scalar:
-            return ()
-        return self.data.shape
-
-    @property
-    def ndim (self):
-        if self._scalar:
-            return 1
-        return self.data.ndim
-
-    @property
-    def size (self):
-        if self._scalar:
-            return 1
-        return self.data.size
+    # (Additional) basic array properties
 
     @property
     def sample_dtype (self):
         return self.data.dtype['samples']
 
-    def __len__ (self):
-        if self._scalar:
-            raise TypeError ('len() of unsized object')
-        return self.data.shape[0]
-
-    # Math.
+    # Algebra
 
     def _inplace_negate (self):
         self.domain = Domain.negate[self.domain]
@@ -331,77 +526,15 @@ class Sampled (object):
         np.negative (self.data['samples'], self.data['samples'])
         return self
 
-
-    def __neg__ (self):
-        rv = self.copy ()
-        rv._inplace_negate ()
-        return rv
-
-    # Comparisons. We are conservative with the build-in operators, but have
-    # some options that are helpful.
-
-    def __lt__ (self, other):
-        raise TypeError ('uncertain value does not have a well-defined "<" comparison; use lt() with caution')
-
-    def __le__ (self, other):
-        raise TypeError ('uncertain value does not have a well-defined "<=" comparison; use le() with caution')
-
-    def __gt__ (self, other):
-        raise TypeError ('uncertain value does not have a well-defined ">" comparison; use gt() with caution')
-
-    def __ge__ (self, other):
-        raise TypeError ('uncertain value does not have a well-defined ">=" comparison; use ge() with caution')
-
-    def __eq__ (self, other):
-        raise TypeError ('uncertain value does not have a well-defined "==" comparison')
-
-    def __ne__ (self, other):
-        raise TypeError ('uncertain value does not have a well-defined "!=" comparison')
-
-
-    # Indexing
-
-    def __getitem__ (self, index):
-        if self._scalar:
-            raise IndexError ('invalid index to scalar variable')
-        return Sampled (self.domain, self.data[index])
-
-    def __setitem__ (self, index, value):
-        if self._scalar:
-            raise TypeError ('object does not support item assignment')
-        value = Sampled.from_other (value, copy=False)
-        self.domain = Domain.union[_ordpair (self.domain, value.domain)]
-        self.data[index] = value.data
-
-
     # Stringification
 
     @staticmethod
     def _str_one (datum):
-        raise NotImplementedError ()
+        raise NotImplementedError () # TODO
 
-
-    def __unicode__ (self):
-        if self._scalar:
-            datum = Sampled._str_one (self.data)
-            return datum + ' <%s %s scalar>' % (Domain.names[self.domain],
-                                                self.__class__.__name__)
-        else:
-            text = np.array2string (self.data, formatter={'all': Sampled._str_one})
-            return text + ' <%s %s %r-array>' % (Domain.names[self.domain],
-                                                 self.__class__.__name__,
-                                                 self.shape)
-
-    __str__ = unicode_to_str
-
-
-    def __repr__ (self):
-        return str (self)
-
-
-    @staticmethod
-    def parse (text, domain=Domain.anything):
-        raise NotImplementedError ()
+    @classmethod
+    def parse (cls, text, domain=Domain.anything):
+        raise NotImplementedError () # TODO
 
 
 def _sampled_unary_negative (q):
@@ -450,41 +583,35 @@ def make_approximate_data (kind, x, u):
     return data
 
 
-class Approximate (object):
+class Approximate (MeasurementABC):
     """An approximate uncertain value, represented with a scalar uncertainty parameter.
 
     """
-    __slots__ = ('domain', 'data', '_scalar')
-
-    def __init__ (self, domain, shape_or_data=None, sample_dtype=np.double):
+    def __init__ (self, domain, shape=None, sample_dtype=np.double, _noalloc=False, _noinit=False):
         self.domain = Domain.normalize (domain)
 
-        if isinstance (shape_or_data, (tuple,) + six.integer_types):
-            self.data = np.empty (shape_or_data, dtype=get_approximate_dtype (sample_dtype))
-            self.data['kind'].fill (Kind.undef)
-        elif isinstance (shape_or_data, (np.ndarray, np.void)):
-            # Scalars end up as the `np.void` type. It's hard to check the
-            # array dtype thoroughly but let's do this:
-            try:
-                assert shape_or_data['kind'].dtype == np.uint8
-            except Exception:
-                raise ValueError ('illegal Approximate initializer array %r' % shape_or_data)
-            self.data = shape_or_data
-        else:
-            raise ValueError ('unrecognized Approximate initializer %r' % shape_or_data)
+        if _noalloc:
+            return # caller's responsibility to set `data` and `_scalar`
 
         # You can't index scalar values which makes it really annoying to
         # implement a lot of our math. So we store scalars as shape (1,) and
         # fake the outer parts.
 
+        self.data = np.empty (shape, dtype=get_approximate_dtype (sample_dtype))
         self._scalar = (self.data.shape == ())
 
         if self._scalar:
             self.data = np.atleast_1d (self.data)
 
-    @staticmethod
-    def from_other (v, copy=True, domain=None):
-        if isinstance (v, Approximate):
+        if _noinit:
+            return # caller's responsibility to fill `data`
+
+        self.data['kind'].fill (Kind.undef)
+
+
+    @classmethod
+    def from_other (cls, v, copy=True, domain=None):
+        if isinstance (v, cls):
             if copy:
                 return v.copy ()
             return v
@@ -503,10 +630,10 @@ class Approximate (object):
             else:
                 domain = Domain.anything
 
-        return Approximate.from_arrays (domain, Kind.msmt, v, 0)
+        return cls.from_arrays (domain, Kind.msmt, v, 0)
 
-    @staticmethod
-    def from_arrays (domain, kind, x, u):
+    @classmethod
+    def from_arrays (cls, domain, kind, x, u):
         domain = Domain.normalize (domain)
         Kind.check (kind)
         if not _all_in_domain (x, domain):
@@ -514,7 +641,7 @@ class Approximate (object):
                               'stated domain' % x)
 
         x = np.asarray (x)
-        r = Approximate (domain, x.shape)
+        r = cls (domain, x.shape)
         r.data['kind'] = kind
         r.data['x'] = x
         r.data['u'] = u
@@ -525,40 +652,13 @@ class Approximate (object):
 
         return r
 
-    def copy (self):
-        return self.__class__ (self.domain, self.data.copy ())
-
-
-    # Basic array properties
-
-    @property
-    def shape (self):
-        if self._scalar:
-            return ()
-        return self.data.shape
-
-    @property
-    def ndim (self):
-        if self._scalar:
-            return 0
-        return self.data.ndim
-
-    @property
-    def size (self):
-        if self._scalar:
-            return 1
-        return self.data.size
+    # (Additional) basic array properties
 
     @property
     def sample_dtype (self):
         return self.data.dtype['x']
 
-    def __len__ (self):
-        if self._scalar:
-            raise TypeError ('len() of unsized object')
-        return self.data.shape[0]
-
-    # Math.
+    # Algebra
 
     def _inplace_negate (self):
         self.domain = Domain.negate[self.domain]
@@ -593,45 +693,17 @@ class Approximate (object):
         return self
 
 
-    def __neg__ (self):
-        rv = self.copy ()
-        rv._inplace_negate ()
-        return rv
-
-    def __abs__ (self):
-        rv = self.copy ()
-        rv._inplace_abs ()
-        return rv
-
-
     def __iadd__ (self, other):
-        other = Approximate.from_other (other, copy=False)
+        other = self.from_other (other, copy=False)
         self.domain = Domain.add[_ordpair (self.domain, other.domain)]
         self.data['kind'] = Kind.add[Kind.binop (self.data['kind'], other.data['kind'])]
         self.data['x'] += other.data['x']
         self.data['u'] = np.sqrt (self.data['u']**2 + other.data['u']**2)
         return self
 
-    def __add__ (self, other):
-        rv = self.copy ()
-        rv += other
-        return rv
-
-    __radd__ = __add__
-
-    def __sub__ (self, other):
-        return self + (-other)
-
-    def __isub__ (self, other):
-        self += (-other)
-        return self
-
-    def __rsub__ (self, other):
-        return (-self) + other
-
 
     def __imul__ (self, other):
-        other = Approximate.from_other (other, copy=False)
+        other = self.from_other (other, copy=False)
         self.domain = Domain.mul[_ordpair (self.domain, other.domain)]
 
         # There's probably a simpler way to make sure that we get the limit directions
@@ -655,32 +727,6 @@ class Approximate (object):
         self.data['u'] = np.sqrt ((self.data['u'] * other.data['x'])**2 +
                                   (other.data['u'] * self.data['x'])**2)
         return self
-
-    def __mul__ (self, other):
-        rv = self.copy ()
-        rv *= other
-        return rv
-
-    __rmul__ = __mul__
-
-    def __itruediv__ (self, other):
-        self *= other**-1
-        return self
-
-    def __truediv__ (self, other):
-        rv = self.copy ()
-        rv /= other
-        return rv
-
-    def __rtruediv__ (self, other):
-        rv = self.copy ()
-        rv._inplace_reciprocate ()
-        rv *= other
-        return rv
-
-    __div__ = __truediv__
-    __idiv__ = __itruediv__
-    __rdiv__ = __rtruediv__
 
 
     def __ipow__ (self, other, modulo=None):
@@ -732,26 +778,8 @@ class Approximate (object):
             self._inplace_reciprocate ()
         return self
 
-    def __pow__ (self, other, module=None):
-        rv = self.copy ()
-        rv **= other
-        return rv
 
-
-    def __rpow__ (self, other, modulo=None):
-        """You might not think that this is common functionality, but it's important
-        for undoing logarithms; i.e. 10**x."""
-
-        if modulo is not None:
-            raise ValueError ('powmod behavior forbidden with Approximates')
-
-        rv = self * np.log (other)
-        rv._inplace_exp ()
-        return rv
-
-
-    # Comparisons. We are conservative with the build-in operators, but have
-    # some options that are helpful.
+    # Comparison helpers
 
     def __lt__ (self, other):
         raise TypeError ('uncertain value does not have a well-defined "<" comparison; use lt() with caution')
@@ -765,11 +793,6 @@ class Approximate (object):
     def __ge__ (self, other):
         raise TypeError ('uncertain value does not have a well-defined ">=" comparison; use ge() with caution')
 
-    def __eq__ (self, other):
-        raise TypeError ('uncertain value does not have a well-defined "==" comparison')
-
-    def __ne__ (self, other):
-        raise TypeError ('uncertain value does not have a well-defined "!=" comparison')
 
     def lt (self, other):
         """Returns true where the values in *self* are less than *other*, following this
@@ -795,6 +818,7 @@ class Approximate (object):
             rv = rv[0]
         return rv
 
+
     def gt (self, other):
         """Note that cannot simply invert `lt` since we have to handle undefs properly."""
         rv = (((self.data['kind'] == Kind.msmt) | (self.data['kind'] == Kind.lower))
@@ -806,21 +830,6 @@ class Approximate (object):
         if self._scalar:
             rv = rv[0]
         return rv
-
-
-    # Indexing
-
-    def __getitem__ (self, index):
-        if self._scalar:
-            raise IndexError ('invalid index to scalar variable')
-        return Approximate (self.domain, self.data[index])
-
-    def __setitem__ (self, index, value):
-        if self._scalar:
-            raise TypeError ('object does not support item assignment')
-        value = Approximate.from_other (value, copy=False)
-        self.domain = Domain.union[_ordpair (self.domain, value.domain)]
-        self.data[index] = value.data
 
 
     # Stringification
@@ -841,26 +850,8 @@ class Approximate (object):
         return '%.3fpm%.3f' % (datum['x'], datum['u'])
 
 
-    def __unicode__ (self):
-        if self._scalar:
-            datum = Approximate._str_one (self.data)
-            return datum + ' <%s %s scalar>' % (Domain.names[self.domain],
-                                                self.__class__.__name__)
-        else:
-            text = np.array2string (self.data, formatter={'all': Approximate._str_one})
-            return text + ' <%s %s %r-array>' % (Domain.names[self.domain],
-                                                 self.__class__.__name__,
-                                                 self.shape)
-
-    __str__ = unicode_to_str
-
-
-    def __repr__ (self):
-        return str (self)
-
-
-    @staticmethod
-    def parse (text, domain=Domain.anything):
+    @classmethod
+    def parse (cls, text, domain=Domain.anything):
         """This only handles scalar values. Accepted formats are:
 
         "?"
@@ -872,7 +863,7 @@ class Approximate (object):
         where {float} stands for a floating-point number.
         """
         domain = Domain.normalize (domain)
-        rv = Approximate (domain, ())
+        rv = cls (domain, ())
 
         if text[0] == '<':
             rv.data['kind'] = Kind.upper
@@ -928,7 +919,7 @@ def _approximate_unary_log (q):
         data['u'][m] = data['u'][m] / data['x'][m]
         data['x'][m] = np.log (data['x'][m])
 
-    return Approximate (domain, data)
+    return Approximate._from_data (domain, data)
 
 def _approximate_unary_log10 (q):
     return _approximate_unary_log (q) / np.log (10)
