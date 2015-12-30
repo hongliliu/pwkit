@@ -520,6 +520,8 @@ class Sampled (MeasurementABC):
             return # caller's responsibility to fill `data`
 
         self.data['kind'].fill (Kind.undef)
+        self.data['samples'].fill (np.nan)
+
 
     @classmethod
     def from_other (cls, v, copy=True, domain=None):
@@ -673,6 +675,8 @@ class Approximate (MeasurementABC):
             return # caller's responsibility to fill `data`
 
         self.data['kind'].fill (Kind.undef)
+        self.data['x'].fill (np.nan)
+        self.data['u'].fill (np.nan)
 
 
     @classmethod
