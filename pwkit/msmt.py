@@ -57,6 +57,8 @@ from .simpleenum import enumeration
 from .numutil import broadcastize, try_asarray
 
 
+
+
 @enumeration
 class Domain (object):
     """An enumeration of possible domains that measurements may span.
@@ -123,6 +125,8 @@ def _all_in_domain (data, domain):
         return np.all (data <= 0)
 
 
+
+
 @enumeration
 class Kind (object):
     undef = 0
@@ -183,6 +187,8 @@ class Kind (object):
         undef, upper, upper, undef, # upper * ...
         undef, lower, undef, lower, # lower * ...
     ])
+
+
 
 
 class MeasurementABC (six.with_metaclass (abc.ABCMeta, object)):
@@ -404,6 +410,55 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, object)):
         raise NotImplementedError ()
 
 
+def _measurement_unary_absolute (q):
+    return q.copy ()._inplace_abs ()
+
+def _measurement_unary_exp (q):
+    return q.copy ()._inplace_exp ()
+
+def _measurement_unary_expm1 (q):
+    """The whole point of this function is that non-naive implementations can
+    achieve higher precision, so this naive implementation is not going to be
+    that useful.
+
+    """
+    return q.copy ()._inplace_exp () - 1
+
+def _measurement_unary_log10 (q):
+    return q.copy ()._inplace_log () / np.log (10)
+
+def _measurement_unary_log1p (q):
+    """The whole point of this function is that non-naive implementations can
+    achieve higher precision, so this naive implementation is not going to be
+    that useful.
+
+    """
+    rv = q.copy ()
+    rv += 1
+    return rv._inplace_log ()
+
+def _measurement_unary_log2 (q):
+    return q.copy ()._inplace_log () / np.log (2)
+
+def _measurement_unary_log (q):
+    return q.copy ()._inplace_log ()
+
+def _measurement_unary_negative (q):
+    return q.copy ()._inplace_negate ()
+
+def _measurement_unary_reciprocal (q):
+    return q.copy ()._inplace_reciprocate ()
+
+def _measurement_unary_sqrt (q):
+    return q**0.5
+
+def _measurement_unary_square (q):
+    return q**2
+
+
+
+
+
 # A Sampled measurement is one in which we propagate uncertainties the only
 # fully tractable way -- by approximating each measurement with a large number
 # of samples that are then processed vectorially. It's absurdly
@@ -540,13 +595,21 @@ class Sampled (MeasurementABC):
         raise NotImplementedError () # TODO
 
 
-def _sampled_unary_negative (q):
-    return q.copy ()._inplace_negate ()
-
-
 sampled_unary_math = {
-    'negative': _sampled_unary_negative,
+    'absolute': _measurement_unary_absolute,
+    'exp': _measurement_unary_exp,
+    'expm1': _measurement_unary_expm1,
+    'log10': _measurement_unary_log10,
+    'log1p': _measurement_unary_log1p,
+    'log2': _measurement_unary_log2,
+    'log': _measurement_unary_log,
+    'negative': _measurement_unary_negative,
+    'reciprocal': _measurement_unary_reciprocal,
+    'sqrt': _measurement_unary_sqrt,
+    'square': _measurement_unary_square,
 }
+
+
 
 
 # "Approximate" measurements. These do not have the absurd memory requirements
@@ -917,33 +980,21 @@ class Approximate (MeasurementABC):
         return rv
 
 
-def _approximate_unary_absolute (q):
-    return q.copy ()._inplace_abs ()
-
-def _approximate_unary_exp (q):
-    return q.copy ()._inplace_exp ()
-
-def _approximate_unary_log (q):
-    return q.copy ()._inplace_log ()
-
-def _approximate_unary_log10 (q):
-    return _approximate_unary_log (q) / np.log (10)
-
-def _approximate_unary_negative (q):
-    return q.copy ()._inplace_negate ()
-
-def _approximate_unary_reciprocal (q):
-    return q.copy ()._inplace_reciprocate ()
-
-
 approximate_unary_math = {
-    'absolute': _approximate_unary_absolute,
-    'exp': _approximate_unary_exp,
-    'log10': _approximate_unary_log10,
-    'log': _approximate_unary_log,
-    'negative': _approximate_unary_negative,
-    'reciprocal': _approximate_unary_reciprocal,
+    'absolute': _measurement_unary_absolute,
+    'exp': _measurement_unary_exp,
+    'expm1': _measurement_unary_expm1,
+    'log10': _measurement_unary_log10,
+    'log1p': _measurement_unary_log1p,
+    'log2': _measurement_unary_log2,
+    'log': _measurement_unary_log,
+    'negative': _measurement_unary_negative,
+    'reciprocal': _measurement_unary_reciprocal,
+    'sqrt': _measurement_unary_sqrt,
+    'square': _measurement_unary_square,
 }
+
+
 
 
 # We want/need to provide a library of standard math functions that can
