@@ -465,7 +465,27 @@ class _PKTableRowProxy (object):
         self._idx = idx
 
     def __repr__ (self):
-        return '<PKTable row #%d>' % self._idx
+        maxnamelen = 0
+        info = []
+
+        for name, col in six.viewitems (self._data):
+            maxnamelen = max (maxnamelen, len (name))
+            info.append ((name, col._repr_single_item (self._idx)))
+
+        if not len (info):
+            return '(PKTable row #%d: no columns defined)' % self._idx
+
+        maxlinelen = 0
+        lines = []
+
+        for name, desc in info:
+            line = name.ljust (maxnamelen) + ' : ' + desc
+            maxlinelen = max (maxlinelen, len (line))
+            lines.append (line)
+
+        lines.append (('(PKTable row #%d)' % self._idx).rjust (maxlinelen))
+        return '\n'.join (lines)
+
 
     def __len__ (self):
         return len (self._data)
