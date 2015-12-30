@@ -7,7 +7,14 @@
 """
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-__all__ = str ('''PKTable PKTableColumnABC ScalarColumn''').split ()
+__all__ = str ('''
+PKTable
+PKTableColumnABC
+PKTableAlgebraColumnABC
+ScalarColumn
+MeasurementColumn
+CoordColumn
+''').split ()
 
 import abc, itertools, operator, six, types
 from collections import OrderedDict
@@ -307,9 +314,9 @@ class _PKTableColumnsHelper (object):
             arrayish_factory = None
             arrayish_data = None
 
-            from .msmt import Approximate
-            if isinstance (sval, Approximate):
-                arrayish_factory = ApproximateColumn._new_from_data
+            from .msmt import MeasurementABC
+            if isinstance (sval, MeasurementABC):
+                arrayish_factory = MeasurementColumn._new_from_data
                 arrayish_data = sval
 
             # Nothing specific worked. Last-ditch effort: np.asarray(). This
@@ -813,22 +820,44 @@ class ScalarColumn (PKTableAlgebraColumnABC):
         self._data[key] = value
 
 
-class ApproximateColumn (PKTableAlgebraColumnABC):
+class MeasurementColumn (PKTableAlgebraColumnABC):
     _data = None
-    "The actual Approximate data."
+    "The actual data, some instance of MeasurementABC."
 
-    def __init__ (self, len, domain='anything', sample_dtype=np.double, _data=None):
+    _measurement_types = {}
+    """A dict mapping textual measurement "type" names to subclasses of
+    :class:`~pwkit.msmt.MeasurementABC`. This is initialized on the first call
+    to :meth:`__init__`; it is not unconditionally initialized to make it so
+    that this module does not necessarily depend on the :mod:`~pwkit.msmt`
+    module.
+
+    """
+    def __init__ (self, length, type='approximate', domain='anything', _data=None, **kwargs):
+        if not len (self._measurement_types):
+            from .msmt import Approximate, Sampled
+            self._measurement_types.update ({
+                'approximate': Approximate,
+                'sampled': Sampled,
+            })
+
         if _data is not None:
             self._data = _data
             return
 
         try:
-            len = int (len)
+            length = int (length)
         except Exception:
-            raise ValueError ('ApproximateColumn length must be an integer')
+            raise ValueError ('MeasurementColumn length must be an integer')
 
-        from .msmt import Approximate
-        self._data = Approximate (domain, (len,), sample_dtype=sample_dtype)
+        import types
+        if isinstance (type, types.TypeType): # type type type!
+            cls = type
+        else:
+            cls = self._measurement_types.get (type)
+            if cls is None:
+                raise ValueError ('unrecognized Measurement type %r' % type)
+
+        self._data = cls (domain, (length,), **kwargs)
 
 
     @classmethod
@@ -845,17 +874,22 @@ class ApproximateColumn (PKTableAlgebraColumnABC):
 
 
     def _repr_single_item (self, idx):
-        from .msmt import Approximate
-        return Approximate._str_one (self._data[idx].data)
+        return self._data._str_one (self._data[idx].data)
 
 
     def _coldesc_for_repr (self):
         from .msmt import Domain
 
-        return '%s %s' % (Domain.names[self._data.domain], self.__class__.__name__)
+        type = '[unknown type!]'
+        for tname, tclass in six.viewitems (self._measurement_types):
+            if tclass == self._data.__class__:
+                type = tname
+                break
+
+        return '%s %s %s' % (Domain.names[self._data.domain], type, self.__class__.__name__)
 
 
-    # Emulating Approximate attributes.
+    # Emulating Measurement attributes.
 
     @property
     def domain (self):
