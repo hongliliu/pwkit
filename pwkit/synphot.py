@@ -499,9 +499,9 @@ class TwomassBandpass (Bandpass):
     _zeropoints = {
         # 2MASS Explanatory Supplement (VI.4.a) and Cohen+ 2003.
         # I've converted W/cm²/μm to erg/s/cm²/Å (factor of 1e3).
-        'J': msmt.Uval.from_norm (3.129e-10, 5.464e-12),
-        'H': msmt.Uval.from_norm (1.133e-10, 2.212e-12),
-        'Ks': msmt.Uval.from_norm (4.283e-11, 8.053e-13),
+        'J': msmt.Sampled.from_norm (3.129e-10, 5.464e-12, domain='nonnegative'),
+        'H': msmt.Sampled.from_norm (1.133e-10, 2.212e-12, domain='nonnegative'),
+        'Ks': msmt.Sampled.from_norm (4.283e-11, 8.053e-13, domain='nonnegative'),
     }
 
     def mag_to_flam (self, mag):
