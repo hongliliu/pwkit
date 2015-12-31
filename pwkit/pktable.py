@@ -690,6 +690,9 @@ class PKTableAlgebraColumnABC (six.with_metaclass (abc.ABCMeta, PKTableColumnABC
     containing the specified data.
 
     """
+    def __neg__ (self):
+        return self.__class__._new_from_data (-self._data)
+
     def __add__ (self, other):
         return self.__class__._new_from_data (self._data + other)
 
@@ -916,7 +919,7 @@ class MeasurementColumn (PKTableAlgebraColumnABC):
         return '%s %s %s' % (Domain.names[self._data.domain], type, self.__class__.__name__)
 
 
-    # Emulating Measurement attributes.
+    # Wrapping Measurement features.
 
     @property
     def domain (self):
@@ -930,6 +933,12 @@ class MeasurementColumn (PKTableAlgebraColumnABC):
     @property
     def sample_dtype (self):
         return self._data.sample_dtype
+
+    def lt (self, other, **kwargs):
+        return self._data.lt (other, **kwargs)
+
+    def gt (self, other, **kwargs):
+        return self._data.gt (other, **kwargs)
 
 
     # Indexing.
