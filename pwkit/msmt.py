@@ -559,21 +559,24 @@ class Sampled (MeasurementABC):
                 return v.copy ()
             return v
 
-        # TODO: handle other value types. If we're here, we just have some
-        # array of floats. Domain can only get less restrictive when we do
-        # math on them, so it's OK to choose the best domain we can given the
-        # data we have.
+        # TODO: handle other value types. If we're still here, we expect some
+        # numerical array-like floats. Domain can only get less restrictive
+        # when we do math on them, so it's OK to choose the best domain we can
+        # given the data we have.
 
-        v = np.asarray (v)
+        a = try_asarray (v)
+        if a is None:
+            raise ValueError ('do not know how to handle operand %r' % v)
+
         if domain is None:
-            if np.all (v >= 0):
+            if np.all (a >= 0):
                 domain = Domain.nonnegative
-            elif np.all (v <= 0):
+            elif np.all (a <= 0):
                 domain = Domain.nonpositive
             else:
                 domain = Domain.anything
 
-        return cls.from_exact_array (domain, Kind.msmt, v)
+        return cls.from_exact_array (domain, Kind.msmt, a)
 
     @classmethod
     def from_exact_array (cls, domain, kind, v):
@@ -797,21 +800,24 @@ class Approximate (MeasurementABC):
                 return v.copy ()
             return v
 
-        # TODO: handle other value types. If we're here, we just have
-        # some array of floats. Domain can only get less restrictive when
-        # we do math on them, so it's OK to choose the best domain we can
+        # TODO: handle other value types. If we're still here, we expect some
+        # numerical array-like floats. Domain can only get less restrictive
+        # when we do math on them, so it's OK to choose the best domain we can
         # given the data we have.
 
-        v = np.asarray (v)
+        a = try_asarray (v)
+        if a is None:
+            raise ValueError ('do not know how to handle operand %r' % v)
+
         if domain is None:
-            if np.all (v >= 0):
+            if np.all (a >= 0):
                 domain = Domain.nonnegative
-            elif np.all (v <= 0):
+            elif np.all (a <= 0):
                 domain = Domain.nonpositive
             else:
                 domain = Domain.anything
 
-        return cls.from_arrays (domain, Kind.msmt, v, 0)
+        return cls.from_arrays (domain, Kind.msmt, a, 0)
 
     @classmethod
     def from_arrays (cls, domain, kind, x, u):
