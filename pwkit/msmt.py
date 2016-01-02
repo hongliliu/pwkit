@@ -13,37 +13,19 @@ Domain
 Kind
 
 MeasurementABC
+MeasurementFunctionLibrary
+ScalarPowFunctionLibrary
 
 sampled_n_samples
 SampledDtypeGenerator
 get_sampled_dtype
 Sampled
-sampled_unary_math
+sampled_function_library
 
 ApproximateDtypeGenerator
 get_approximate_dtype
 Approximate
-approximate_unary_math
-
-basic_unary_math
-absolute
-arccos
-arcsin
-arctan
-cos
-expm1
-exp
-isfinite
-log10
-log1p
-log2
-log
-negative
-reciprocal
-sin
-sqrt
-square
-tan
+approximate_function_library
 ''').split ()
 
 import abc, operator, six
@@ -53,6 +35,7 @@ import numpy as np
 from . import PKError, unicode_to_str
 from .simpleenum import enumeration
 from .numutil import broadcastize, try_asarray
+from .mathlib import MathFunctionLibrary, MathlibDelegatingObject, AlwaysOutFunctionLibrary, numpy_types
 
 
 
@@ -189,11 +172,11 @@ class Kind (object):
 
 
 
-class MeasurementABC (six.with_metaclass (abc.ABCMeta, object)):
+class MeasurementABC (six.with_metaclass (abc.ABCMeta, MathlibDelegatingObject)):
     """A an array of measurements that may be uncertain or limits.
 
     """
-    __slots__ = ('domain', 'data', '_scalar')
+    __slots__ = ('domain', 'data', '_scalar', '_pk_mathlib_library_')
 
     @classmethod
     def from_other (cls, v, copy=True, domain=None):
@@ -240,144 +223,6 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, object)):
         if self._scalar:
             raise TypeError ('len() of unsized object')
         return self.data.shape[0]
-
-
-    # Algebra -- in-place stubs
-
-    def _inplace_negate (self):
-        raise NotImplementedError ()
-
-    def _inplace_abs (self):
-        raise NotImplementedError ()
-
-    def _inplace_reciprocate (self):
-        raise NotImplementedError ()
-
-    def _inplace_log (self):
-        raise NotImplementedError ()
-
-    def _inplace_exp (self):
-        raise NotImplementedError ()
-
-    def _inplace_fill_unity (self):
-        raise NotImplementedError ()
-
-    def __iadd__ (self, other):
-        raise NotImplementedError ()
-
-    def __imul__ (self, other):
-        raise NotImplementedError ()
-
-
-    # Algebra -- given in-place operations, we can do the rest generically.
-    # These of course can be overridden by subclasses if needed.
-
-    def __neg__ (self):
-        rv = self.copy ()
-        rv._inplace_negate ()
-        return rv
-
-    def __abs__ (self):
-        rv = self.copy ()
-        rv._inplace_abs ()
-        return rv
-
-    def __add__ (self, other):
-        rv = self.copy ()
-        rv += other
-        return rv
-
-    __radd__ = __add__
-
-    def __sub__ (self, other):
-        return self + (-other)
-
-    def __isub__ (self, other):
-        self += (-other)
-        return self
-
-    def __rsub__ (self, other):
-        return (-self) + other
-
-    def __mul__ (self, other):
-        rv = self.copy ()
-        rv *= other
-        return rv
-
-    __rmul__ = __mul__
-
-    def __itruediv__ (self, other):
-        self *= reciprocal (other)
-        return self
-
-    def __truediv__ (self, other):
-        rv = self.copy ()
-        rv /= other
-        return rv
-
-    def __rtruediv__ (self, other):
-        rv = self.copy ()
-        rv._inplace_reciprocate ()
-        rv *= other
-        return rv
-
-    __div__ = __truediv__
-    __idiv__ = __itruediv__
-    __rdiv__ = __rtruediv__
-
-    def __ipow__ (self, other, modulo=None):
-        if modulo is not None:
-            raise ValueError ('powmod behavior forbidden with measurements')
-
-        try:
-            v = float (other)
-        except TypeError:
-            raise ValueError ('measurements can only be exponentiated by exact values')
-
-        if v == 0:
-            self._inplace_fill_unity ()
-            return self
-
-        reciprocate = (v < 0)
-        if reciprocate:
-            v = -v
-
-        i = int (v)
-
-        if v != i:
-            # A fractional exponent.
-            self._inplace_log ()
-            self *= v
-            self._inplace_exp ()
-        else:
-            # An integer exponent: implement as a series of multiplies, so
-            # that we can work with negative values (which the log/exp
-            # approach can't). Not the most efficient, but reduces the chance
-            # for bugs.
-            orig = self.copy ()
-            for _ in range (i - 1):
-                self *= orig
-
-        if reciprocate:
-            self._inplace_reciprocate ()
-        return self
-
-    def __pow__ (self, other, modulo=None):
-        rv = self.copy ()
-        rv **= other
-        return rv
-
-    def __rpow__ (self, other, modulo=None):
-        """You might not think that this is common functionality, but it's important
-        for undoing logarithms; i.e. 10**x.
-
-        """
-        if modulo is not None:
-            raise ValueError ('powmod behavior forbidden with Measurements')
-
-        rv = self * log (other)
-        rv._inplace_exp ()
-        return rv
 
 
     # Comparisons. We are conservative with the built-in operators.
@@ -445,51 +290,157 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, object)):
         raise NotImplementedError ()
 
 
-def _measurement_unary_absolute (q):
-    return q.copy ()._inplace_abs ()
+class MeasurementFunctionLibrary (MathFunctionLibrary):
+    """This function library implements as much basic algebra as it can
+    in terms of the following fundamental operations:
 
-def _measurement_unary_exp (q):
-    return q.copy ()._inplace_exp ()
+    - add
+    - exp
+    - log
+    - multiply
+    - negative
+    - reciprocal
 
-def _measurement_unary_expm1 (q):
-    """The whole point of this function is that non-naive implementations can
-    achieve higher precision, so this naive implementation is not going to be
-    that useful.
-
-    """
-    return q.copy ()._inplace_exp () - 1
-
-def _measurement_unary_log10 (q):
-    return q.copy ()._inplace_log () / np.log (10)
-
-def _measurement_unary_log1p (q):
-    """The whole point of this function is that non-naive implementations can
-    achieve higher precision, so this naive implementation is not going to be
-    that useful.
+    This class must be wrapped in :class:`ScalarPowFunctionLibrary` so that
+    the `out` parameter always exists when these functions get called, plus
+    ther `power` operation can be defined specially.
 
     """
-    rv = q.copy ()
-    rv += 1
-    return rv._inplace_log ()
+    def empty_like_broadcasted (self, x, y=None):
+        """Create a new empty data structure matching the shape of *x* and *y*
+        broadcasted together; *y* is optional, in which case the shape should
+        just be that of *x*.
 
-def _measurement_unary_log2 (q):
-    return q.copy ()._inplace_log () / np.log (2)
+        """
+        raise NotImplementedError ()
 
-def _measurement_unary_log (q):
-    return q.copy ()._inplace_log ()
+    def fill_from_broadcasted (self, x, out):
+        """Fill *out* with the values from *x*, broadcasting as appropriate.
 
-def _measurement_unary_negative (q):
-    return q.copy ()._inplace_negate ()
+        """
+        raise NotImplementedError ()
 
-def _measurement_unary_reciprocal (q):
-    return q.copy ()._inplace_reciprocate ()
+    def fill_unity_like (self, x, out):
+        """Fill *out* with ones, matching the (broadcasted) masking state of *x* if
+        applicable.
 
-def _measurement_unary_sqrt (q):
-    return q**0.5
+        """
+        raise NotImplementedError ()
 
-def _measurement_unary_square (q):
-    return q**2
+    def coerce_one (self, x):
+        """Convert an arbitrary numerical-ish object into the right type.
 
+        """
+        raise NotImplementedError ()
+
+    def coerce (self, x, y=None, out=None):
+        return self.coerce_one (x), self.coerce_one (y), self.coerce_one (out)
+
+    def expm1 (self, x, out):
+        """The whole point of this function is that non-naive implementations can
+        achieve higher precision, so this naive implementation is not going to be
+        that useful.
+
+        """
+        self.exp (x, out)
+        self.subtract (out, 1, out)
+        return out
+
+    def log10 (self, x, out):
+        self.log (x, out)
+        self.true_divide (out, self.coerce_one (np.log (10)), out)
+        return out
+
+    def log1p (self, x, out):
+        """The whole point of this function is that non-naive implementations can
+        achieve higher precision, so this naive implementation is not going to be
+        that useful.
+
+        """
+        self.add (x, 1, out)
+        self.log (out, out)
+        return out
+
+    def log2 (self, x, out):
+        self.log (x, out)
+        self.true_divide (out, self.coerce_one (np.log (2)), out)
+        return out
+
+    def sqrt (self, x, out):
+        self.power (x, 0.5, out)
+        return out
+
+    def square (self, x, out):
+        self.power (x, 2, out)
+        return out
+
+    def subtract (self, x, y, out):
+        # We have to allocate a temporary in case `x is out`. Or you know we could
+        # just implement the function.
+        temp = self.empty_like_broadcasted (y)
+        self.negative (y, temp)
+        self.add (x, temp, out)
+        return out
+
+    def true_divide (self, x, y, out):
+        # We have to allocate a temporary in case `x is out`. Or you know we could
+        # just implement the function.
+        temp = self.empty_like_broadcasted (y)
+        self.reciprocal (y, temp)
+        self.multiply (x, temp, out)
+        return out
+
+
+class ScalarPowFunctionLibrary (AlwaysOutFunctionLibrary):
+    def power (self, x, y, out):
+        try:
+            v = float (x)
+            # If we didn't just raise an exception, this is the __rpow__ case.
+            # You might not think that this is common functionality, but it's
+            # important for undoing logarithms; i.e. 10**x.
+            if out is None:
+                out = self.sub_library.empty_like_broadcasted (y)
+            self.multiply (y, np.log (v), out)
+            self.exp (out, out)
+            return out
+        except TypeError:
+            pass
+
+        try:
+            v = float (y)
+        except TypeError:
+            raise ValueError ('measurements can only be exponentiated by exact values')
+
+        if out is None:
+            out = self.sub_library.empty_like_broadcasted (x)
+
+        if v == 0:
+            self.sub_library.fill_unity_like (x, out)
+            return out
+
+        reciprocate = (v < 0)
+        if reciprocate:
+            v = -v
+
+        i = int (v)
+
+        if v != i:
+            # A fractional exponent.
+            self.log (x, out)
+            self.multiply (out, v, out)
+            self.exp (out, out)
+        else:
+            # An integer exponent: implement as a series of multiplies, so
+            # that we can work with negative values (which the log/exp
+            # approach can't). Not the most efficient, but reduces the chance
+            # for bugs.
+            self.sub_library.fill_from_broadcasted (x, out)
+            for _ in range (i - 1):
+                self.multiply (out, x, out)
+
+        if reciprocate:
+            self.reciprocal (out, out)
+        return out
 
 
 
@@ -530,6 +481,7 @@ class Sampled (MeasurementABC):
 
     """
     def __init__ (self, domain, shape, sample_dtype=np.double, _noalloc=False, _noinit=False):
+        self._pk_mathlib_library_ = sampled_function_library
         self.domain = Domain.normalize (domain)
 
         if _noalloc:
@@ -608,91 +560,7 @@ class Sampled (MeasurementABC):
 
     @property
     def sample_dtype (self):
-        return self.data.dtype['samples']
-
-
-    # Algebra
-
-    def _inplace_negate (self):
-        self.domain = Domain.negate[self.domain]
-        self.data['kind'] = Kind.negate[self.data['kind']]
-        np.negative (self.data['samples'], self.data['samples'])
-        return self
-
-
-    def _inplace_abs (self):
-        self.domain = Domain.nonnegative
-        np.absolute (self.data['samples'], self.data['samples'])
-        assert False, 'figure out what to do here'
-        return self
-
-
-    def _inplace_reciprocate (self):
-        # domain is unchanged
-        self.data['kind'] = Kind.reciprocal[self.data['kind']]
-        # np.reciprocal() truncates integers, which we don't want
-        np.divide (1, self.data['samples'], self.data['samples'])
-        return self
-
-
-    def _inplace_log (self):
-        # kind is unchanged
-        np.log (self.data['samples'], self.data['samples'])
-
-        if self.domain != Domain.nonnegative:
-            undef = np.any (~np.isfinite (self.data['samples']), axis=-1) | (self.data['kind'] == Kind.upper)
-            self.data['kind'][undef] = Kind.undef
-            self.data['samples'][undef,:] = np.nan
-
-        self.domain = Domain.anything
-        return self
-
-
-    def _inplace_exp (self):
-        self.domain = Domain.nonnegative
-        # kind is unchanged
-        np.exp (self.data['samples'], self.data['samples'])
-        return self
-
-
-    def _inplace_fill_unity (self):
-        self.domain = Domain.nonnegative
-        defined = (self.data['kind'] != Kind.undef)
-        self.data['kind'][defined] = Kind.msmt
-        self.data['samples'][defined] = 1
-        return self
-
-
-    def __iadd__ (self, other):
-        other = self.from_other (other, copy=False)
-        self.domain = Domain.add[_ordpair (self.domain, other.domain)]
-        # kind is unchanged
-        self.data['kind'] = Kind.add[Kind.binop (self.data['kind'], other.data['kind'])]
-        self.data['samples'] += other.data['samples']
-        return self
-
-
-    def __imul__ (self, other):
-        other = self.from_other (other, copy=False)
-        self.domain = Domain.mul[_ordpair (self.domain, other.domain)]
-
-        # There's probably a smarter way to make sure that we get the limit
-        # directions correct, but this ought to at least work.
-
-        skind = self.data['kind'].copy ()
-        snegate = ((skind == Kind.lower) | (skind == Kind.upper)) & (self.data['samples'][...,0] < 0)
-        skind[snegate] = Kind.negate[skind[snegate]]
-
-        okind = other.data['kind'].copy ()
-        onegate = ((okind == Kind.lower) | (okind == Kind.upper)) & (other.data['samples'][...,0] < 0)
-        okind[onegate] = Kind.negate[okind[onegate]]
-
-        self.data['kind'] = Kind.posmul[Kind.binop (skind, okind)]
-        nnegate = snegate ^ onegate
-        self.data['kind'][nnegate] = Kind.negate[self.data['kind'][nnegate]]
-
-        self.data['samples'] *= other.data['samples']
-        return self
+        return self.data.dtype['samples'].base
 
 
     # Stringification
@@ -719,19 +587,132 @@ class Sampled (MeasurementABC):
         raise NotImplementedError () # TODO
 
 
-sampled_unary_math = {
-    'absolute': _measurement_unary_absolute,
-    'exp': _measurement_unary_exp,
-    'expm1': _measurement_unary_expm1,
-    'log10': _measurement_unary_log10,
-    'log1p': _measurement_unary_log1p,
-    'log2': _measurement_unary_log2,
-    'log': _measurement_unary_log,
-    'negative': _measurement_unary_negative,
-    'reciprocal': _measurement_unary_reciprocal,
-    'sqrt': _measurement_unary_sqrt,
-    'square': _measurement_unary_square,
-}
+class SampledFunctionLibrary (MeasurementFunctionLibrary):
+    def accepts (self, opname, other):
+        return isinstance (other, numpy_types + (Sampled,))
+
+
+    def coerce_one (self, x):
+        if x is None:
+            return None
+
+        if isinstance (x, Sampled):
+            return x
+
+        # TODO: handle other value types. If we're still here, we expect some
+        # numerical array-like floats. Domain can only get less restrictive
+        # when we do math on them, so it's OK to choose the best domain we can
+        # given the data we have.
+
+        a = try_asarray (x)
+        if a is None:
+            raise ValueError ('do not know how to handle operand %r' % x)
+
+        if np.all (a >= 0):
+            domain = Domain.nonnegative
+        elif np.all (a <= 0):
+            domain = Domain.nonpositive
+        else:
+            domain = Domain.anything
+
+        return Sampled.from_exact_array (domain, Kind.msmt, a)
+
+
+    def empty_like_broadcasted (self, x, y=None):
+        if y is None:
+            shape = x.shape
+            sdtype = x.sample_dtype
+        else:
+            shape = np.broadcast (x, y).shape
+            sdtype = np.result_type (x.sample_dtype, y.sample_dtype)
+
+        return Sampled (Domain.anything, shape, sample_dtype=sdtype, _noinit=True)
+
+
+    def fill_from_broadcasted (self, x, out):
+        out.domain = x.domain
+        out.data['kind'] = x.data['kind']
+        out.data['samples'] = x.data['samples']
+
+
+    def fill_unity_like (self, x, out):
+        out.domain = Domain.nonnegative
+        m = (x.data['kind'] != Kind.undef)
+        out.data['kind'][m] = Kind.msmt
+        out.data['samples'][m] = 1
+        m = ~m
+        out.data['kind'][m] = Kind.undef
+        out.data['samples'][m] = np.nan
+
+
+    # The actual core math functions
+
+    def add (self, x, y, out):
+        out.domain = Domain.add[_ordpair (x.domain, y.domain)]
+        out.data['kind'] = Kind.add[Kind.binop (x.data['kind'], y.data['kind'])]
+        np.add (x.data['samples'], y.data['samples'], out.data['samples'])
+        return out
+
+
+    def exp (self, x, out):
+        out.domain = Domain.nonnegative
+        out.data['kind'] = x.data['kind']
+        np.exp (x.data['samples'], out.data['samples'])
+        return out
+
+
+    def log (self, x, out):
+        # Remember that we may have `x is kind`!
+        out.data['kind'] = x.data['kind']
+        np.log (x.data['samples'], out.data['samples'])
+
+        if out.domain != Domain.nonnegative:
+            undef = np.any (~np.isfinite (out.data['samples']), axis=-1) | (out.data['kind'] == Kind.upper)
+            out.data['kind'][undef] = Kind.undef
+            out.data['samples'][undef,:] = np.nan
+
+        out.domain = Domain.anything
+        return out
+
+
+    def multiply (self, x, y, out):
+        out.domain = Domain.mul[_ordpair (x.domain, y.domain)]
+
+        # There's probably a smarter way to make sure that we get the limit
+        # directions correct, but this ought to at least work.
+
+        xkind = x.data['kind'].copy ()
+        xnegate = ((xkind == Kind.lower) | (xkind == Kind.upper)) & (x.data['samples'][...,0] < 0)
+        xkind[xnegate] = Kind.negate[xkind[xnegate]]
+
+        ykind = y.data['kind'].copy ()
+        ynegate = ((ykind == Kind.lower) | (ykind == Kind.upper)) & (y.data['samples'][...,0] < 0)
+        ykind[ynegate] = Kind.negate[ykind[ynegate]]
+
+        out.data['kind'] = Kind.posmul[Kind.binop (xkind, ykind)]
+        nnegate = xnegate ^ ynegate
+        out.data['kind'][nnegate] = Kind.negate[out.data['kind'][nnegate]]
+
+        np.multiply (x.data['samples'], y.data['samples'], out.data['samples'])
+        return out
+
+
+    def negative (self, x, out):
+        out.domain = Domain.negate[x.domain]
+        out.data['kind'] = Kind.negate[x.data['kind']]
+        np.negative (x.data['samples'], out.data['samples'])
+        return out
+
+
+    def reciprocal (self, x, out):
+        out.domain = x.domain
+        out.data['kind'] = Kind.reciprocal[x.data['kind']]
+        # np.reciprocal() truncates integers, which we don't want
+        np.divide (1, x.data['samples'], out.data['samples'])
+        return out
+
+
+sampled_function_library = ScalarPowFunctionLibrary (SampledFunctionLibrary ())
 
 
 
@@ -770,6 +751,7 @@ class Approximate (MeasurementABC):
 
     """
     def __init__ (self, domain, shape, sample_dtype=np.double, _noalloc=False, _noinit=False):
+        self._pk_mathlib_library_ = approximate_function_library
         self.domain = Domain.normalize (domain)
 
         if _noalloc:
@@ -847,103 +829,6 @@ class Approximate (MeasurementABC):
         return self.data.dtype['x']
 
 
-    # Algebra
-
-    def _inplace_negate (self):
-        self.domain = Domain.negate[self.domain]
-        self.data['kind'] = Kind.negate[self.data['kind']]
-        np.negative (self.data['x'], self.data['x'])
-        # uncertainty unchanged.
-        return self
-
-
-    def _inplace_abs (self):
-        self.domain = Domain.nonnegative
-        np.absolute (self.data['x'], self.data['x'])
-        # uncertainty unchanged
-        assert False, 'figure out what to do here'
-        return self
-
-
-    def _inplace_reciprocate (self):
-        # domain unchanged
-        self.data['kind'] = Kind.reciprocal[self.data['kind']]
-        # np.reciprocal() truncates integers, which we don't want
-        np.divide (1, self.data['x'], self.data['x'])
-        np.multiply (self.data['u'], self.data['x']**2, self.data['u'])
-        return self
-
-
-    def _inplace_log (self):
-        if self.domain == Domain.nonnegative:
-            np.divide (self.data['u'], self.data['x'], self.data['u'])
-            np.log (self.data['x'], self.data['x'])
-        else:
-            m = (self.data['x'] <= 0) | (self.data['kind'] == Kind.upper) | (self.data['kind'] == Kind.undef)
-            self.data['kind'][m] = Kind.undef
-            self.data['u'][m] = np.nan
-            self.data['x'][m] = np.nan
-            m = ~m
-            self.data['u'][m] = self.data['u'][m] / self.data['x'][m]
-            self.data['x'][m] = np.log (self.data['x'][m])
-
-        self.domain = Domain.anything
-        return self
-
-
-    def _inplace_exp (self):
-        self.domain = Domain.nonnegative
-        # kind is unchanged
-        np.exp (self.data['x'], self.data['x'])
-        np.multiply (self.data['u'], self.data['x'], self.data['u'])
-        return self
-
-
-    def _inplace_fill_unity (self):
-        self.domain = Domain.nonnegative
-        defined = (self.data['kind'] != Kind.undef)
-        self.data['kind'][defined] = Kind.msmt
-        self.data['x'][defined] = 1
-        self.data['u'][defined] = 0
-        return self
-
-
-    def __iadd__ (self, other):
-        other = self.from_other (other, copy=False)
-        self.domain = Domain.add[_ordpair (self.domain, other.domain)]
-        self.data['kind'] = Kind.add[Kind.binop (self.data['kind'], other.data['kind'])]
-        self.data['x'] += other.data['x']
-        self.data['u'] = np.sqrt (self.data['u']**2 + other.data['u']**2)
-        return self
-
-
-    def __imul__ (self, other):
-        other = self.from_other (other, copy=False)
-        self.domain = Domain.mul[_ordpair (self.domain, other.domain)]
-
-        # There's probably a simpler way to make sure that we get the limit directions
-        # correct, but this ought to at least work.
-
-        skind = self.data['kind'].copy ()
-        snegate = (self.data['x'] < 0)
-        skind[snegate] = Kind.negate[skind[snegate]]
-
-        okind = other.data['kind'].copy ()
-        onegate = (other.data['x'] < 0)
-        okind[onegate] = Kind.negate[okind[onegate]]
-
-        self.data['kind'] = Kind.posmul[Kind.binop (skind, okind)]
-        nnegate = snegate ^ onegate
-        self.data['kind'][nnegate] = Kind.negate[self.data['kind'][nnegate]]
-
-        # Besides the kinds, this is straightforward:
-
-        self.data['x'] *= other.data['x']
-        self.data['u'] = np.sqrt ((self.data['u'] * other.data['x'])**2 +
-                                  (other.data['u'] * self.data['x'])**2)
-        return self
-
-
     # Comparison helpers
 
     def __lt__ (self, other):
@@ -967,6 +852,8 @@ class Approximate (MeasurementABC):
         - The result for *msmt* values is the result of comparing the "representative" value.
         - The result for limits is true if the limit is contained entirely within
           the proposed interval.
+
+        *other* must be a scalar.
 
         TODO: arguments adjusting the behavior.
 
@@ -1065,84 +952,144 @@ class Approximate (MeasurementABC):
         return rv
 
 
-approximate_unary_math = {
-    'absolute': _measurement_unary_absolute,
-    'exp': _measurement_unary_exp,
-    'expm1': _measurement_unary_expm1,
-    'log10': _measurement_unary_log10,
-    'log1p': _measurement_unary_log1p,
-    'log2': _measurement_unary_log2,
-    'log': _measurement_unary_log,
-    'negative': _measurement_unary_negative,
-    'reciprocal': _measurement_unary_reciprocal,
-    'sqrt': _measurement_unary_sqrt,
-    'square': _measurement_unary_square,
-}
+class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
+    def accepts (self, opname, other):
+        return isinstance (other, numpy_types + (Approximate,))
 
 
+    def coerce_one (self, x):
+        if x is None:
+            return None
+
+        if isinstance (x, Approximate):
+            return x
+
+        # TODO: handle other value types. If we're still here, we expect some
+        # numerical array-like floats. Domain can only get less restrictive
+        # when we do math on them, so it's OK to choose the best domain we can
+        # given the data we have.
+
+        a = try_asarray (x)
+        if a is None:
+            raise ValueError ('do not know how to handle operand %r' % x)
+
+        if np.all (a >= 0):
+            domain = Domain.nonnegative
+        elif np.all (a <= 0):
+            domain = Domain.nonpositive
+        else:
+            domain = Domain.anything
+
+        return Approximate.from_other (a, domain=domain)
 
 
-# We want/need to provide a library of standard math functions that can
-# operate on any kind of measurement -- I cannot find a way to get Numpy to
-# delegate the various standard options in a vectorized manner. Rather than
-# writing several large and complicated handle-anything functions, we
-# implement them independently for each data type, then have generic code the
-# uses the type of its argument to determine which function to invoke. This
-# declutters things and also lets the implementations of math operators take
-# advantage of the unary functions.
+    def empty_like_broadcasted (self, x, y=None):
+        if y is None:
+            shape = x.shape
+            sdtype = x.sample_dtype
+        else:
+            shape = np.broadcast (x, y).shape
+            sdtype = np.result_type (x.sample_dtype, y.sample_dtype)
 
-basic_unary_math = {
-    'absolute': np.absolute,
-    'arccos': np.arccos,
-    'arcsin': np.arcsin,
-    'arctan': np.arctan,
-    'cos': np.cos,
-    'expm1': np.expm1,
-    'exp': np.exp,
-    'isfinite': np.isfinite,
-    'log10': np.log10,
-    'log1p': np.log1p,
-    'log2': np.log2,
-    'log': np.log,
-    'negative': np.negative,
-    'reciprocal': lambda x: 1. / x, # np.reciprocal floordivs ints. I don't want that.
-    'sin': np.sin,
-    'sqrt': np.sqrt,
-    'square': np.square,
-    'tan': np.tan,
-}
+        return Approximate (Domain.anything, shape, sample_dtype=sdtype, _noinit=True)
 
 
-def _dispatch_unary_math (name, value):
-    if isinstance (value, Approximate):
-        table = approximate_unary_math
-    elif isinstance (value, Sampled):
-        table = sampled_unary_math
-    elif try_asarray (value) is not None:
-        table = basic_unary_math
-    else:
-        raise ValueError ('cannot treat %r as a numerical for %s' % (value, name))
-
-    func = table.get (name)
-    if func is None:
-        raise ValueError ('no implementation of %s for %r' % (name, value))
-    return func (value)
+    def fill_from_broadcasted (self, x, out):
+        out.domain = x.domain
+        out.data['kind'] = x.data['kind']
+        out.data['x'] = x.data['x']
+        out.data['u'] = x.data['u']
 
 
-def _make_wrapped_unary_math (name):
-    def unary_mathfunc (val):
-        return _dispatch_unary_math (name, val)
-    return unary_mathfunc
+    def fill_unity_like (self, x, out):
+        out.domain = Domain.nonnegative
+        m = (x.data['kind'] != Kind.undef)
+        out.data['kind'][m] = Kind.msmt
+        out.data['x'][m] = 1
+        out.data['u'][m] = 0
+        m = ~m
+        out.data['kind'][m] = Kind.undef
+        out.data['x'][m] = np.nan
+        out.data['u'][m] = np.nan
 
 
-def _init_unary_math ():
-    """This function creates a variety of global unary math functions, matching
-    the keys in :data:`basic_unary_math`.
+    # The actual core math functions
 
-    """
-    g = globals ()
+    def add (self, x, y, out):
+        out.domain = Domain.add[_ordpair (x.domain, y.domain)]
+        out.data['kind'] = Kind.add[Kind.binop (x.data['kind'], y.data['kind'])]
+        np.add (x.data['x'], y.data['x'], out.data['x'])
+        np.sqrt (x.data['u']**2 + y.data['x']**2, out.data['u'])
+        return out
 
-    for name in six.iterkeys (basic_unary_math):
-        g[name] = _make_wrapped_unary_math (name)
 
-_init_unary_math ()
+    def exp (self, x, out):
+        out.domain = Domain.nonnegative
+        out.data['kind'] = x.data['kind']
+        np.multiply (x.data['u'], x.data['x'], out.data['u'])
+        np.exp (x.data['x'], out.data['x'])
+        return out
+
+
+    def log (self, x, out):
+        # Remember that we may have `x is kind`!
+        out.data['kind'] = x.data['kind']
+
+        if x.domain == Domain.nonnegative:
+            np.divide (x.data['u'], x.data['x'], out.data['u'])
+            np.log (x.data['x'], out.data['x'])
+        else:
+            m = (x.data['x'] <= 0) | (x.data['kind'] == Kind.upper) | (x.data['kind'] == Kind.undef)
+            out.data['kind'][m] = Kind.undef
+            out.data['x'][m] = np.nan
+            out.data['u'][m] = np.nan
+            m = ~m
+            # can't use np.divide(), etc., since we're fancy-indexing:
+            out.data['u'][m] = x.data['u'][m] / x.data['x'][m]
+            out.data['x'][m] = np.log (x.data['x'][m])
+
+        out.domain = Domain.anything
+        return out
+
+
+    def multiply (self, x, y, out):
+        out.domain = Domain.mul[_ordpair (x.domain, y.domain)]
+
+        # There's probably a smarter way to make sure that we get the limit
+        # directions correct, but this ought to at least work.
+
+        xkind = x.data['kind'].copy ()
+        xnegate = (x.data['x'] < 0)
+        xkind[xnegate] = Kind.negate[xkind[xnegate]]
+
+        ykind = y.data['kind'].copy ()
+        ynegate = (y.data['x'] < 0)
+        ykind[ynegate] = Kind.negate[ykind[ynegate]]
+
+        out.data['kind'] = Kind.posmul[Kind.binop (xkind, ykind)]
+        nnegate = xnegate ^ ynegate
+        out.data['kind'][nnegate] = Kind.negate[out.data['kind'][nnegate]]
+
+        np.sqrt ((x.data['u'] * y.data['x'])**2 + (y.data['u'] * x.data['x'])**2, out.data['u'])
+        np.multiply (x.data['x'], y.data['x'], out.data['x'])
+        return out
+
+
+    def negative (self, x, out):
+        out.domain = Domain.negate[x.domain]
+        out.data['kind'] = Kind.negate[x.data['kind']]
+        np.negative (x.data['x'], out.data['x'])
+        out.data['u'] = x.data['u']
+        return out
+
+
+    def reciprocal (self, x, out):
+        out.domain = x.domain
+        out.data['kind'] = Kind.reciprocal[x.data['kind']]
+        # np.reciprocal() truncates integers, which we don't want
+        np.divide (1, x.data['x'], out.data['x'])
+        np.multiply (x.data['u'], out.data['x']**2, out.data['u'])
+        return out
+
+
+approximate_function_library = ScalarPowFunctionLibrary (ApproximateFunctionLibrary ())

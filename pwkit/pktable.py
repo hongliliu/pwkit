@@ -10,7 +10,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 __all__ = str ('''
 PKTable
 PKTableColumnABC
-PKTableAlgebraColumnABC
 ScalarColumn
 MeasurementColumn
 CoordColumn
@@ -20,6 +19,8 @@ import abc, itertools, operator, six, types
 from collections import OrderedDict
 from six.moves import range
 import numpy as np
+from .oo_helpers import indexerproperty
+from .mathlib import MathlibDelegatingObject
 
 
 def _is_sequence (thing):
@@ -316,7 +317,7 @@ class _PKTableColumnsHelper (object):
 
             from .msmt import MeasurementABC
             if isinstance (sval, MeasurementABC):
-                arrayish_factory = MeasurementColumn._new_from_data
+                arrayish_factory = MeasurementColumn._pk_mathlib_rewrap_
                 arrayish_data = sval
 
             # Nothing specific worked. Last-ditch effort: np.asarray(). This
@@ -332,7 +333,7 @@ class _PKTableColumnsHelper (object):
                 arrayish_data = try_asarray (sval)
                 if arrayish_data is None:
                     raise ValueError ('unhandled PKTable column value %r for %r' % (sval, skey))
-                arrayish_factory = ScalarColumn._new_from_data
+                arrayish_factory = ScalarColumn._pk_mathlib_rewrap_
 
             # At this point arrayish_{factory,data} have been set and we can use
             # our generic infrastructure.
@@ -683,94 +684,7 @@ class _PKTableFancyIndexedColumnView (PKTableColumnABC):
         return 'fancy-index view of %s' % self._parent._coldesc_for_repr ()
 
 
-class PKTableAlgebraColumnABC (six.with_metaclass (abc.ABCMeta, PKTableColumnABC)):
-    """A column that you can do basic algebra on. Assumes that the instance has an
-    attribute named `_data` on which the algebra can be performed, and that it
-    has a class method _new_from_data (data) that will create a new column
-    containing the specified data.
-
-    """
-    def __neg__ (self):
-        return self.__class__._new_from_data (-self._data)
-
-    def __add__ (self, other):
-        return self.__class__._new_from_data (self._data + other)
-
-    __radd__ = __add__
-
-    def __iadd__ (self, other):
-        self._data += other
-        return self
-
-    def __sub__ (self, other):
-        return self.__class__._new_from_data (self._data - other)
-
-    def __rsub__ (self, other):
-        return self.__class__._new_from_data (other - self._data)
-
-    def __isub__ (self, other):
-        self._data -= other
-        return self
-
-    def __mul__ (self, other):
-        return self.__class__._new_from_data (self._data * other)
-
-    __rmul__ = __mul__
-
-    def __imul__ (self, other):
-        self._data *= other
-        return self
-
-    def __truediv__ (self, other):
-        return self.__class__._new_from_data (self._data / other)
-
-    def __rtruediv__ (self, other):
-        return self.__class__._new_from_data (other / self._data)
-
-    def __itruediv__ (self, other):
-        self._data /= other
-        return self
-
-    def __floordiv__ (self, other):
-        return self.__class__._new_from_data (self._data // other)
-
-    def __rfloordiv__ (self, other):
-        return self.__class__._new_from_data (other // self._data)
-
-    def __ifloordiv__ (self, other):
-        self._data //= other
-        return self
-
-    def __pow__ (self, other, modulo=None):
-        return self.__class__._new_from_data (pow (self._data, other, modulo))
-
-    def __ipow__ (self, other):
-        self._data **= other
-        return self
-
-    def __rpow__ (self, other, modulo=None):
-        return self.__class__._new_from_data (pow (other, self._data, modulo))
-
-    def __lt__ (self, other):
-        return (self._data < other) # note: we are returning bool array, not PKTableColumn
-
-    def __le__ (self, other):
-        return (self._data <= other)
-
-    def __gt__ (self, other):
-        return (self._data > other)
-
-    def __ge__ (self, other):
-        return (self._data >= other)
-
-    def __eq__ (self, other):
-        return (self._data == other)
-
-    def __ne__ (self, other):
-        return (self._data != other)
-
-
-class ScalarColumn (PKTableAlgebraColumnABC):
+class ScalarColumn (PKTableColumnABC, MathlibDelegatingObject):
     _data = None
     "The actual array data."
 
@@ -793,8 +707,11 @@ class ScalarColumn (PKTableAlgebraColumnABC):
 
 
     @classmethod
-    def _new_from_data (cls, data):
+    def _pk_mathlib_rewrap_ (cls, data):
         return cls (None, _data=data)
+
+    def _pk_mathlib_unwrap_ (self):
+        return self._data
 
 
     def __len__ (self):
@@ -803,30 +720,6 @@ class ScalarColumn (PKTableAlgebraColumnABC):
 
     def __iter__ (self):
         return iter (self._data)
-
-
-    def __array__ (self, dtype=None):
-        """Numpy docs: "If a class ... having the __array__ method is used as the
-        output object of an ufunc, results will be written to the object
-        returned by __array__. **Similar conversion is done on input
-        arrays**." So, basically, this should return an equivalent Numpy array
-        that math can be done on.
-
-        """
-        return self._data
-
-
-    def __array_wrap__ (self, array, context=None):
-        """Numpy docs: "At the end of every ufunc, this method is called on the input
-        object with the highest array priority, or the output object if one
-        was specified. The ufunc-computed array is passed in and whatever is
-        returned is passed to the user." So, once Numpy has done math on an
-        object, this is used to turn it back into our wrapper type. Columns
-        are mutable containers, so we modify our contents and return self.
-
-        """
-        self._data = array
-        return self
 
 
     # Indexing.
@@ -850,7 +743,7 @@ class ScalarColumn (PKTableAlgebraColumnABC):
         self._data[key] = value
 
 
-class MeasurementColumn (PKTableAlgebraColumnABC):
+class MeasurementColumn (PKTableColumnABC, MathlibDelegatingObject):
     _data = None
     "The actual data, some instance of MeasurementABC."
 
@@ -891,8 +784,11 @@ class MeasurementColumn (PKTableAlgebraColumnABC):
 
 
     @classmethod
-    def _new_from_data (cls, data):
+    def _pk_mathlib_rewrap_ (cls, data):
         return cls (None, _data=data)
+
+    def _pk_mathlib_unwrap_ (self):
+        return self._data
 
 
     def __len__ (self):
@@ -957,43 +853,6 @@ class MeasurementColumn (PKTableAlgebraColumnABC):
         self._data[key] = value
 
 
-class indexerproperty_Helper (object):
-    def __init__ (self, instance, descriptor):
-        self._instance = instance
-        self._descriptor = descriptor
-
-    def __getitem__ (self, key):
-        return self._descriptor._getter (self._instance, key)
-
-    def __setitem__ (self, key, value):
-        if self._descriptor._setter is None:
-            raise TypeError ('item assignment is not allowed by this property')
-        return self._descriptor._setter (self._instance, key, value)
-
-    def __delitem__ (self, key):
-        if self._descriptor._deleter is None:
-            raise TypeError ('item deletion is not allowed by this property')
-        return self._descriptor._deleter (self._instance, key)
-
-
-class indexerproperty (object):
-    def __init__ (self, getter):
-        self._getter = getter
-        self._setter = None
-        self._deleter = None
-
-    def __get__ (self, instance, owner):
-        return indexerproperty_Helper (instance, self)
-
-    def setter (self, thesetter):
-        self._setter = thesetter
-        return self
-
-    def deleter (self, thedeleter):
-        self._deleter = thedeleter
-        return self
-
-
 class CoordColumn (PKTableColumnABC):
     """astropy.coordinates.SkyCoord instances are not mutable, so we don't use
     them for our data storage. However, we should ideally support different
@@ -1017,10 +876,6 @@ class CoordColumn (PKTableColumnABC):
         self._data = np.empty ((len, 2))
         self._data.fill (np.nan)
 
-
-    @classmethod
-    def _new_from_data (cls, data):
-        return cls (None, _data=data)
 
     @classmethod
     def new_from_radec_rad (cls, ra, dec):
