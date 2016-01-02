@@ -2,8 +2,8 @@
    This file licensed under the Creative Commons Attribution-ShareAlike 3.0
    Unported License (CC-BY-SA).
 
-Helper for decorators on class methods (``pwkit.method_decorator``)
+Helpers for structured programming (``pwkit.oo_helpers``)
 ========================================================================
 
-.. automodule:: pwkit.method_decorator
+.. automodule:: pwkit.oo_helpers
    :members:

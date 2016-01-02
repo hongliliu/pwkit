@@ -1,5 +1,23 @@
-# Copied from the GitHub repository described below. A few modifications made.
-# Override __call__ and possibly fixup
+# This file combines code with varying copyrights and licenses -- see below.
+# -*- mode: python; coding: utf-8 -*-
+
+"""A collection of useful, syntactic-sugar-y functions, decorators, etc.
+
+"""
+
+from __future__ import absolute_import, division, print_function, unicode_literals
+
+__all__ = ('''
+method_decorator
+partialmethod
+indexerproperty
+''').split ()
+
+
+
+
+# The 'method_decorator' class -- copied from the GitHub repository described
+# below. A few modifications made: Override __call__ and possibly fixup.
 
 '''
 Python decorator that knows the class the decorated method is bound to.
@@ -243,3 +261,140 @@ def test():
 
 if __name__ == '__main__':
     test()
+
+
+
+
+# The 'partialmethod' helper, backported from Python 3.5.0. The only change is
+# one instance of 3.x-only ``cls_or_self, *args = args`` syntax. Copyright as
+# described in the following comments; license is the Python license.
+
+from functools import partial
+
+# Python module wrapper for _functools C module
+# to allow utilities written in Python to be added
+# to the functools module.
+# Written by Nick Coghlan <ncoghlan at gmail.com>,
+# Raymond Hettinger <python at rcn.com>,
+# and Łukasz Langa <lukasz at langa.pl>.
+#   Copyright (C) 2006-2013 Python Software Foundation.
+# See C source code for _functools credits/copyright
+
+class partialmethod(object):
+    """Method descriptor with partial application of the given arguments
+    and keywords.
+
+    Supports wrapping existing descriptors and handles non-descriptor
+    callables as instance methods.
+    """
+
+    def __init__(self, func, *args, **keywords):
+        if not callable(func) and not hasattr(func, "__get__"):
+            raise TypeError("{!r} is not callable or a descriptor"
+                                 .format(func))
+
+        # func could be a descriptor like classmethod which isn't callable,
+        # so we can't inherit from partial (it verifies func is callable)
+        if isinstance(func, partialmethod):
+            # flattening is mandatory in order to place cls/self before all
+            # other arguments
+            # it's also more efficient since only one function will be called
+            self.func = func.func
+            self.args = func.args + args
+            self.keywords = func.keywords.copy()
+            self.keywords.update(keywords)
+        else:
+            self.func = func
+            self.args = args
+            self.keywords = keywords
+
+    def __repr__(self):
+        args = ", ".join(map(repr, self.args))
+        keywords = ", ".join("{}={!r}".format(k, v)
+                                 for k, v in self.keywords.items())
+        format_string = "{module}.{cls}({func}, {args}, {keywords})"
+        return format_string.format(module=self.__class__.__module__,
+                                    cls=self.__class__.__qualname__,
+                                    func=self.func,
+                                    args=args,
+                                    keywords=keywords)
+
+    def _make_unbound_method(self):
+        def _method(*args, **keywords):
+            call_keywords = self.keywords.copy()
+            call_keywords.update(keywords)
+            cls_or_self = args[0]
+            rest = args[1:]
+            call_args = (cls_or_self,) + self.args + tuple(rest)
+            return self.func(*call_args, **call_keywords)
+        _method.__isabstractmethod__ = self.__isabstractmethod__
+        _method._partialmethod = self
+        return _method
+
+    def __get__(self, obj, cls):
+        get = getattr(self.func, "__get__", None)
+        result = None
+        if get is not None:
+            new_func = get(obj, cls)
+            if new_func is not self.func:
+                # Assume __get__ returning something new indicates the
+                # creation of an appropriate callable
+                result = partial(new_func, *self.args, **self.keywords)
+                try:
+                    result.__self__ = new_func.__self__
+                except AttributeError:
+                    pass
+        if result is None:
+            # If the underlying descriptor didn't do anything, treat this
+            # like an instance method
+            result = self._make_unbound_method().__get__(obj, cls)
+        return result
+
+    @property
+    def __isabstractmethod__(self):
+        return getattr(self.func, "__isabstractmethod__", False)
+
+
+
+# Code here and below is:
+#
+# Copyright 2015 Peter Williams and collaborators
+# Licensed under the MIT License.
+
+class indexerproperty_Helper (object):
+    def __init__ (self, instance, descriptor):
+        self._instance = instance
+        self._descriptor = descriptor
+
+    def __getitem__ (self, key):
+        return self._descriptor._getter (self._instance, key)
+
+    def __setitem__ (self, key, value):
+        if self._descriptor._setter is None:
+            raise TypeError ('item assignment is not allowed by this property')
+        return self._descriptor._setter (self._instance, key, value)
+
+    def __delitem__ (self, key):
+        if self._descriptor._deleter is None:
+            raise TypeError ('item deletion is not allowed by this property')
+        return self._descriptor._deleter (self._instance, key)
+
+
+class indexerproperty (object):
+    """A decorator to make a property that is a named, virtual indexer."""
+
+    def __init__ (self, getter):
+        self._getter = getter
+        self._setter = None
+        self._deleter = None
+
+    def __get__ (self, instance, owner):
+        return indexerproperty_Helper (instance, self)
+
+    def setter (self, thesetter):
+        self._setter = thesetter
+        return self
+
+    def deleter (self, thedeleter):
+        self._deleter = thedeleter
+        return self

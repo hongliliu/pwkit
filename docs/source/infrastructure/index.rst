@@ -11,4 +11,4 @@ This documentation has a lot of stubs.
    :maxdepth: 2
 
    pwkit-environments-toplevel.rst
-   pwkit-method_decorator.rst
+   pwkit-oo_helpers.rst

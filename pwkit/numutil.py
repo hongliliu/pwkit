@@ -28,7 +28,7 @@ import functools
 from six.moves import range
 import numpy as np
 
-from .method_decorator import method_decorator
+from .oo_helpers import method_decorator
 
 
 def _broadcastize_spec_to_scalar_filter (s):
@@ -148,6 +148,8 @@ def try_asarray (thing):
     or array of dtype ``Object``, which is often not helpful.
 
     """
+    # NOTE: this function is duplicated in mathlib.
+
     thing = np.asarray (thing)
     if thing.dtype.kind not in 'bifc':
         return None
