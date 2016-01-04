@@ -447,20 +447,20 @@ class TidiedFunctionLibrary (six.with_metaclass (TidiedFunctionLibraryMeta, Math
                                    'and "%s" in %s' % (opname, x.__class__.__name__,
                                                        y.__class__.__name__, self))
 
-    def coerce (self, x, y=None, out=None):
+    def coerce (self, opname, x, y=None, out=None):
         raise NotImplementedError ()
 
     def empty_like_broadcasted (self, x, y=None):
         raise NotImplementedError ()
 
     def generic_unary (self, opname, x, out=None, **kwargs):
-        x, _, out = self.coerce (x, None, out)
+        x, _, out = self.coerce (opname, x, None, out)
         if out is None:
             out = self.empty_like_broadcasted (x)
         return getattr (self, 'tidy_' + opname) (x, out, **kwargs)
 
     def generic_binary (self, opname, x, y, out=None, **kwargs):
-        x, y, out = self.coerce (x, y, out)
+        x, y, out = self.coerce (opname, x, y, out)
         if out is None:
             out = self.empty_like_broadcasted (x, y)
         return getattr (self, 'tidy_' + opname) (x, y, out, **kwargs)

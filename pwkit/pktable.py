@@ -791,7 +791,7 @@ class PKColumnFunctionLibrary (TidiedFunctionLibrary):
 
         return self.coltype (None, _data=np.asarray (v))
 
-    def coerce (self, x, y=None, out=None):
+    def coerce (self, opname, x, y=None, out=None):
         return self._coerce_one (x), self._coerce_one (y), self._coerce_one (out)
 
     def empty_like_broadcasted (self, x, y=None):

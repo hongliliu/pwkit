@@ -333,7 +333,7 @@ class MeasurementFunctionLibrary (TidiedFunctionLibrary):
         raise NotImplementedError ()
 
 
-    def coerce (self, x, y=None, out=None):
+    def coerce (self, opname, x, y=None, out=None):
         return self.coerce_one (x), self.coerce_one (y), self.coerce_one (out)
 
 
