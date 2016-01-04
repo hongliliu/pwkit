@@ -126,8 +126,10 @@ true_divide
 ''').split ()
 
 
-# TODO: additional functions?
-all_unary_funcs = numpy_unary_ufuncs
+all_unary_funcs = numpy_unary_ufuncs + str('''
+repvals
+''').split ()
+
 all_binary_funcs = numpy_binary_ufuncs
 
 
@@ -209,6 +211,13 @@ numpy_types = np.ScalarType + (np.generic, np.chararray, np.ndarray, np.recarray
 class NumpyFunctionLibrary (MathFunctionLibrary):
     def accepts (self, opname, other):
         return isinstance (other, numpy_types)
+
+    def repvals (self, x, out=None):
+        if out is None:
+            out = np.array (x, copy=True)
+        else:
+            out[:] = x
+        return out
 
 
 def _fill_numpy_library_type ():
@@ -450,17 +459,17 @@ class TidiedFunctionLibrary (six.with_metaclass (TidiedFunctionLibraryMeta, Math
     def coerce (self, opname, x, y=None, out=None):
         raise NotImplementedError ()
 
-    def empty_like_broadcasted (self, x, y=None):
+    def make_output_array (self, opname, x, y=None):
         raise NotImplementedError ()
 
     def generic_unary (self, opname, x, out=None, **kwargs):
         x, _, out = self.coerce (opname, x, None, out)
         if out is None:
-            out = self.empty_like_broadcasted (x)
+            out = self.make_output_array (opname, x)
         return getattr (self, 'tidy_' + opname) (x, out, **kwargs)
 
     def generic_binary (self, opname, x, y, out=None, **kwargs):
         x, y, out = self.coerce (opname, x, y, out)
         if out is None:
-            out = self.empty_like_broadcasted (x, y)
+            out = self.make_output_array (opname, x, y)
         return getattr (self, 'tidy_' + opname) (x, y, out, **kwargs)

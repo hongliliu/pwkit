@@ -794,7 +794,7 @@ class PKColumnFunctionLibrary (TidiedFunctionLibrary):
     def coerce (self, opname, x, y=None, out=None):
         return self._coerce_one (x), self._coerce_one (y), self._coerce_one (out)
 
-    def empty_like_broadcasted (self, x, y=None):
+    def make_output_array (self, opname, x, y=None):
         if y is None:
             shape = x._data.shape
             dtype = x._data.dtype
@@ -806,12 +806,19 @@ class PKColumnFunctionLibrary (TidiedFunctionLibrary):
             raise TypeError ('math with PKTableColumns may only yield 1-dimensional '
                              'arrays; got %r' % shape)
 
+        if opname == 'repvals':
+            return np.empty (shape, dtype=dtype)
+
         return self.coltype.new_like (x, dtype=dtype, length=shape[0])
 
     def generic_tidy_unary (self, opname, x, out):
         dlib = get_library_for (x._data)
+        if opname == 'tidy_repvals':
+            outdata = out
+        else:
+            outdata = out._data
         # ``[5:]`` strips the tidy_ prefix
-        getattr (dlib, opname[5:]) (x._data, out._data)
+        getattr (dlib, opname[5:]) (x._data, outdata)
         return out
 
     def generic_tidy_binary (self, opname, x, y, out):
@@ -935,6 +942,9 @@ class MeasurementColumn (PKTableColumnABC, MathlibDelegatingObject):
 
     def gt (self, other, **kwargs):
         return self._data.gt (other, **kwargs)
+
+    def repvals (self, **kwargs):
+        return self._data.repvals (**kwargs)
 
 
     # Indexing.

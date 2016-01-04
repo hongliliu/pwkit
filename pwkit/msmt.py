@@ -264,6 +264,12 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, MathlibDelegatingObject))
         self.data[index] = value.data
 
 
+    # mathlib convenience
+
+    def repvals (self, **kwargs):
+        return self._pk_mathlib_library_.repvals (self, **kwargs)
+
+
     # Stringification
 
     @staticmethod
@@ -305,10 +311,9 @@ class MeasurementFunctionLibrary (TidiedFunctionLibrary):
     - reciprocal
 
     """
-    def empty_like_broadcasted (self, x, y=None):
-        """Create a new empty data structure matching the shape of *x* and *y*
-        broadcasted together; *y* is optional, in which case the shape should
-        just be that of *x*.
+    def make_output_array (self, opname, x, y=None):
+        """Create a new array to hold the output of mathlib operation *opname*, given
+        inputs *x* and *y*. *y* may be None if the operation is unary.
 
         """
         raise NotImplementedError ()
@@ -381,7 +386,7 @@ class MeasurementFunctionLibrary (TidiedFunctionLibrary):
             # You might not think that this is common functionality, but it's
             # important for undoing logarithms; i.e. 10**x.
             if out is None:
-                out = self.empty_like_broadcasted (y)
+                out = self.make_output_array ('multiply', y)
             self.multiply (y, np.log (v), out)
             self.exp (out, out)
             return out
@@ -394,7 +399,7 @@ class MeasurementFunctionLibrary (TidiedFunctionLibrary):
             raise ValueError ('measurements can only be exponentiated by exact values')
 
         if out is None:
-            out = self.empty_like_broadcasted (x)
+            out = self.make_output_array ('log', x)
 
         if v == 0:
             self.fill_unity_like (x, out)
@@ -438,7 +443,7 @@ class MeasurementFunctionLibrary (TidiedFunctionLibrary):
     def tidy_subtract (self, x, y, out):
         # We have to allocate a temporary in case `x is out`. Or you know we could
         # just implement the function.
-        temp = self.empty_like_broadcasted (y)
+        temp = self.make_output_array ('subtract', y)
         self.negative (y, temp)
         self.add (x, temp, out)
         return out
@@ -447,7 +452,7 @@ class MeasurementFunctionLibrary (TidiedFunctionLibrary):
     def tidy_true_divide (self, x, y, out):
         # We have to allocate a temporary in case `x is out`. Or you know we could
         # just implement the function.
-        temp = self.empty_like_broadcasted (y)
+        temp = self.make_output_array ('reciprocal', y)
         self.reciprocal (y, temp)
         self.multiply (x, temp, out)
         return out
@@ -627,13 +632,16 @@ class SampledFunctionLibrary (MeasurementFunctionLibrary):
         return Sampled.from_exact_array (domain, Kind.msmt, a)
 
 
-    def empty_like_broadcasted (self, x, y=None):
+    def make_output_array (self, opname, x, y=None):
         if y is None:
             shape = x.shape
             sdtype = x.dtype
         else:
             shape = np.broadcast (x, y).shape
             sdtype = np.result_type (x.dtype, y.dtype)
+
+        if opname == 'repvals':
+            return np.empty (shape, dtype=sdtype)
 
         return Sampled (Domain.anything, shape, dtype=sdtype, _noinit=True)
 
@@ -992,13 +1000,16 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
         return Approximate.from_other (a, domain=domain)
 
 
-    def empty_like_broadcasted (self, x, y=None):
+    def make_output_array (self, opname, x, y=None):
         if y is None:
             shape = x.shape
             sdtype = x.dtype
         else:
             shape = np.broadcast (x, y).shape
             sdtype = np.result_type (x.dtype, y.dtype)
+
+        if opname == 'repvals':
+            return np.empty (shape, dtype=sdtype)
 
         return Approximate (Domain.anything, shape, dtype=sdtype, _noinit=True)
 
@@ -1098,6 +1109,22 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
         # np.reciprocal() truncates integers, which we don't want
         np.divide (1, x.data['x'], out.data['x'])
         np.multiply (x.data['u'], out.data['x']**2, out.data['u'])
+        return out
+
+
+    def repvals (self, x, out=None, method=None, limitsok=False):
+        if not limitsok and np.any ((x.data['kind'] == Kind.lower) | (x.data['kind'] == Kind.upper)):
+            raise ValueError ('cannot call repvals() on measurement array containing '
+                              'limits without limitsok=True')
+
+        if out is not None:
+            out[:] = x.data['x']
+            return out
+
+        out = x.data['x'].copy ()
+
+        if x._scalar:
+            out = out[0]
         return out
 
 
