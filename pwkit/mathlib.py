@@ -191,11 +191,11 @@ class MathFunctionLibrary (six.with_metaclass (MathFunctionLibraryMeta, object))
     def accepts (self, opname, other):
         return False
 
-    def generic_unary (self, opname, x, out=None):
+    def generic_unary (self, opname, x, out=None, **kwargs):
         raise NotImplementedError ('math function "%s" not implemented for objects of type "%s" in %s'
                                    % (opname, x.__class__.__name__, self))
 
-    def generic_binary (self, opname, x, y, out=None):
+    def generic_binary (self, opname, x, y, out=None, **kwargs):
         raise NotImplementedError ('math function "%s" not implemented for objects of types "%s" '
                                    'and "%s" in %s' % (opname, x.__class__.__name__,
                                                        y.__class__.__name__, self))
@@ -259,12 +259,12 @@ def get_library_for (x, y=None):
                                                            y, y.__class__.__name__))
 
 
-def _dispatch_unary_function (name, x, out=None):
-    return getattr (get_library_for (x), name) (x, out)
+def _dispatch_unary_function (name, x, out=None, **kwargs):
+    return getattr (get_library_for (x), name) (x, out, **kwargs)
 
 
-def _dispatch_binary_function (name, x, y, out=None):
-    return getattr (get_library_for (x, y), name) (x, y, out)
+def _dispatch_binary_function (name, x, y, out=None, **kwargs):
+    return getattr (get_library_for (x, y), name) (x, y, out, **kwargs)
 
 
 def _create_wrappers (namespace):
@@ -438,11 +438,11 @@ class TidiedFunctionLibrary (six.with_metaclass (TidiedFunctionLibraryMeta, Math
     all arguments have been coerced to uniform types.
 
     """
-    def generic_tidy_unary (self, opname, x, out):
+    def generic_tidy_unary (self, opname, x, out, **kwargs):
         raise NotImplementedError ('math function "%s" not implemented for objects of type "%s" in %s'
                                    % (opname, x.__class__.__name__, self))
 
-    def generic_tidy_binary (self, opname, x, y, out):
+    def generic_tidy_binary (self, opname, x, y, out, **kwargs):
         raise NotImplementedError ('math function "%s" not implemented for objects of types "%s" '
                                    'and "%s" in %s' % (opname, x.__class__.__name__,
                                                        y.__class__.__name__, self))
@@ -453,14 +453,14 @@ class TidiedFunctionLibrary (six.with_metaclass (TidiedFunctionLibraryMeta, Math
     def empty_like_broadcasted (self, x, y=None):
         raise NotImplementedError ()
 
-    def generic_unary (self, opname, x, out=None):
+    def generic_unary (self, opname, x, out=None, **kwargs):
         x, _, out = self.coerce (x, None, out)
         if out is None:
             out = self.empty_like_broadcasted (x)
-        return getattr (self, 'tidy_' + opname) (x, out)
+        return getattr (self, 'tidy_' + opname) (x, out, **kwargs)
 
-    def generic_binary (self, opname, x, y, out=None):
+    def generic_binary (self, opname, x, y, out=None, **kwargs):
         x, y, out = self.coerce (x, y, out)
         if out is None:
             out = self.empty_like_broadcasted (x, y)
-        return getattr (self, 'tidy_' + opname) (x, y, out)
+        return getattr (self, 'tidy_' + opname) (x, y, out, **kwargs)
