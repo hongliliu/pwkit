@@ -14,14 +14,18 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 __all__ = str ('''
 numpy_unary_ufuncs
 numpy_binary_ufuncs
+MathFunctionLibraryMeta
 MathFunctionLibrary
+
 NumpyFunctionLibrary
 numpy_library
 numpy_types
+
 get_library_for
 MathlibDelegatingObject
-MathlibDelegatingWrapper
-AlwaysOutFunctionLibrary
+
+TidiedFunctionLibraryMeta
+TidiedFunctionLibrary
 ''').split ()
 
 import abc, operator, six
@@ -122,38 +126,79 @@ true_divide
 ''').split ()
 
 
-# TODO: additional functions
+# TODO: additional functions?
 all_unary_funcs = numpy_unary_ufuncs
 all_binary_funcs = numpy_binary_ufuncs
 
 
 
+def metaclass_lookup_attribute (attrname, classdict, parents):
+    """Um, surely there's a better way to do all of this? We're trying to see if a
+    given name is defined anywhere in the under-construction class or its
+    superclasses.
 
-class _MathFunctionLibraryBase (object):
+    The parent search could be better but I think should only be inefficient,
+    not wrong, unless you're really going out of your way to mess with this
+    code. We need to use __getattribute__ because we need to interrogate the
+    partialmethod objects, which are descriptors.
+
+    """
+
+    attr = classdict.get (attrname)
+    if attr is not None:
+        return attr
+
+    for parent in parents:
+        for pp in parent.mro ():
+            try:
+                attr = object.__getattribute__ (pp, attrname)
+                return attr
+            except AttributeError:
+                pass
+
+    raise TypeError ('metaclass user must implement "%s" attribute' % attrname)
+
+
+def metaclass_maybe_add_generic_impl (opname, classdict, parents, generic):
+    try:
+        impl = metaclass_lookup_attribute (opname, classdict, parents)
+    except TypeError:
+        impl = None
+
+    if impl is not None and not getattr (impl, '_generic_impl', False):
+        return # there is an implementation and it's not generic
+
+    impl = classdict[opname] = partialmethod (generic, opname)
+    impl._generic_impl = True
+
+
+class MathFunctionLibraryMeta (type):
+    def __new__ (cls, name, parents, dct):
+        generic = metaclass_lookup_attribute ('generic_unary', dct, parents)
+
+        for opname in all_unary_funcs:
+            metaclass_maybe_add_generic_impl (opname, dct, parents, generic)
+
+        generic = metaclass_lookup_attribute ('generic_binary', dct, parents)
+
+        for opname in all_binary_funcs:
+            metaclass_maybe_add_generic_impl (opname, dct, parents, generic)
+
+        return super (MathFunctionLibraryMeta, cls).__new__ (cls, name, parents, dct)
+
+
+class MathFunctionLibrary (six.with_metaclass (MathFunctionLibraryMeta, object)):
     def accepts (self, opname, other):
         return False
 
+    def generic_unary (self, opname, x, out=None):
+        raise NotImplementedError ('math function "%s" not implemented for objects of type "%s" in %s'
+                                   % (opname, x.__class__.__name__, self))
 
-def _unimplemented_unary_func (name, x, out=None):
-    raise NotImplementedError ('math function "%s" not implemented for objects of type "%s"'
-                               % (name, x.__class__.__name__))
-
-def _unimplemented_binary_func (name, x, y, out=None):
-    raise NotImplementedError ('math function "%s" not implemented for objects of type "%s"'
-                               % (name, x.__class__.__name__))
-
-def _make_base_library_type ():
-    items = {}
-
-    for name in all_unary_funcs:
-        items[name] = partial (_unimplemented_unary_func, name)
-
-    for name in all_binary_funcs:
-        items[name] = partial (_unimplemented_binary_func, name)
-
-    return type (str('MathFunctionLibrary'), (_MathFunctionLibraryBase,), items)
-
-MathFunctionLibrary = _make_base_library_type ()
+    def generic_binary (self, opname, x, y, out=None):
+        raise NotImplementedError ('math function "%s" not implemented for objects of types "%s" '
+                                   'and "%s" in %s' % (opname, x.__class__.__name__,
+                                                       y.__class__.__name__, self))
 
 
 
@@ -161,175 +206,65 @@ MathFunctionLibrary = _make_base_library_type ()
 numpy_types = np.ScalarType + (np.generic, np.chararray, np.ndarray, np.recarray,
                                np.ma.MaskedArray, list, tuple)
 
-class _NumpyFunctionLibraryBase (MathFunctionLibrary):
+class NumpyFunctionLibrary (MathFunctionLibrary):
     def accepts (self, opname, other):
         return isinstance (other, numpy_types)
 
 
-def _make_numpy_library_type ():
+def _fill_numpy_library_type ():
     items = {}
 
     for name in numpy_unary_ufuncs:
         # Look up implementations robustly to keep compat with older Numpys.
         impl = getattr (np, name, None)
         if impl is not None:
-            items[name] = impl
+            setattr (NumpyFunctionLibrary, name, impl)
 
     for name in numpy_binary_ufuncs:
         impl = getattr (np, name, None)
         if impl is not None:
-            items[name] = impl
+            setattr (NumpyFunctionLibrary, name, impl)
 
-    return type (str('NumpyFunctionLibrary'), (_NumpyFunctionLibraryBase,), items)
-
-NumpyFunctionLibrary = _make_numpy_library_type ()
-
+_fill_numpy_library_type ()
 numpy_library = NumpyFunctionLibrary ()
 
 
 
 
-def _try_asarray (thing):
-    # This duplicates numutil._try_asarray because I think I might eventually
-    # want numutil to be able to depend on mathlib.
-    thing = np.asarray (thing)
-    if thing.dtype.kind not in 'bifc':
-        return None
-    return thing
-
-
-def get_library_for (x):
+def get_library_for (x, y=None):
     # Efficiency (?): if it's a standard numpy or builtin type, delegate to
     # that ASAP.
 
-    if isinstance (x, numpy_types):
+    if isinstance (x, numpy_types) and (y is None or isinstance (y, numpy_types)):
         return numpy_library
-
-    # If it has a _pk_mathlib_library_ property, then, well, good:
-
-    library = getattr (x, '_pk_mathlib_library_', None)
-    if library is not None:
-        return library
-
-    # If the object has a _pk_mathlib_unwrap_ function, it has been asserted
-    # to be a completely stateless wrapper for some sub-object on which one
-    # may do math.
-
-    unwrap = getattr (x, '_pk_mathlib_unwrap_', None)
-    if unwrap is not None:
-        return get_library_for (unwrap ())
-
-    raise ValueError ('cannot identify math function library for object '
-                      '%r of type %s' % (x, x.__class__.__name__))
-
-
-
-
-def _dispatch_unary_function (name, x, out=None):
-    # Efficiency (?): if it's a standard numpy or builtin type, delegate to
-    # that ASAP. TODO: use castable_n
-
-    if isinstance (x, numpy_types):
-        return getattr (numpy_library, name) (x, out)
-
-    # If it has a _pk_mathlib_library_ property, it's telling us how to do
-    # math on it.
-
-    library = getattr (x, '_pk_mathlib_library_', None)
-    if library is not None:
-        return getattr (library, name) (x, out)
-
-    # If the object has a _pk_mathlib_unwrap_ function, it has been asserted
-    # to be a completely stateless wrapper for some sub-object on which one
-    # may do math.
-
-    unwrap = getattr (x, '_pk_mathlib_unwrap_', None)
-    if unwrap is not None:
-        unwrapped = unwrap ()
-
-        if out is None:
-            result = _dispatch_unary_function (name, unwrapped, out)
-            return x._pk_mathlib_rewrap_ (result)
-
-        if out is x:
-            _dispatch_unary_function (name, unwrapped, unwrapped)
-            return x
-
-        # We'll just have to hope that the implementation knows what to do with
-        # whatever the caller is doing.
-        _dispatch_unary_function (name, unwrapped, out)
-        return out
-
-    raise ValueError ('cannot determine how to apply math function "%s" to object '
-                      '%r of type %s' % (name, x, x.__class__.__name__))
-
-
-def _dispatch_binary_function (name, x, y, out=None):
-    # Efficiency (?): if they're both standard numpy or builtin types,
-    # delegate to numpy ASAP.
-
-    if isinstance (x, numpy_types) and isinstance (y, numpy_types):
-        return getattr (numpy_library, name) (x, y, out)
 
     # If either object has a _pk_mathlib_library_ function, it can tell us how
     # to combine the operands.
 
     library = getattr (x, '_pk_mathlib_library_', None)
-    if library is not None and library.accepts (name, y):
-        return getattr (library, name) (x, y, out)
+
+    if library is not None and (y is None or library.accepts (None, y)):
+        return library
+
+    if y is None:
+        raise ValueError ('cannot identify math function library for object '
+                          '%r of type %s' % (x, x.__class__.__name__))
 
     library = getattr (y, '_pk_mathlib_library_', None)
-    if library is not None and library.accepts (name, x):
-        return getattr (library, name) (x, y, out)
+    if library is not None and library.accepts (None, x):
+        return library
 
-    # If either object has a _pk_mathlib_unwrap_ function, it has been
-    # asserted to be a completely stateless wrapper for some sub-object on
-    # which one may do math.
+    raise ValueError ('cannot identify math function library for objects '
+                      '%r of type %s and %r of type %s' % (x, x.__class__.__name__,
+                                                           y, y.__class__.__name__))
 
-    unwrap = getattr (x, '_pk_mathlib_unwrap_', None)
-    if unwrap is not None:
-        unwrapped = unwrap ()
 
-        if out is None:
-            result = _dispatch_binary_function (name, unwrapped, y, out)
-            return x._pk_mathlib_rewrap_ (result)
+def _dispatch_unary_function (name, x, out=None):
+    return getattr (get_library_for (x), name) (x, out)
 
-        if out is x:
-            _dispatch_binary_function (name, unwrapped, y, unwrapped)
-            return x
 
-        _dispatch_binary_function (name, unwrapped, y, out)
-        return out
-
-    unwrap = getattr (y, '_pk_mathlib_unwrap_', None)
-    if unwrap is not None:
-        unwrapped = unwrap ()
-
-        if out is None:
-            result = _dispatch_binary_function (name, x, unwrapped, out)
-            return y._pk_mathlib_rewrap_ (result)
-
-        if out is y:
-            _dispatch_binary_function (name, x, unwrapped, unwrapped)
-            return y
-
-        _dispatch_binary_function (name, x, unwrapped, out)
-        return out
-
-    # Finally, maybe we can convert one or both of the objects to an ndarray,
-    # and maybe things will work out better after we do that.
-
-    a = _try_asarray (x)
-    if a is not None and a is not x:
-        return _dispatch_binary_function (name, a, y, out)
-
-    a = _try_asarray (y)
-    if a is not None and a is not y:
-        return _dispatch_binary_function (name, x, a, out)
-
-    raise ValueError ('cannot determine how to apply math function "%s" to objects '
-                      '%r (type %s) and %r (type %s)' % (name, x, x.__class__.__name__,
-                                                         y, y.__class__.__name__))
+def _dispatch_binary_function (name, x, y, out=None):
+    return getattr (get_library_for (x, y), name) (x, y, out)
 
 
 def _create_wrappers (namespace):
@@ -337,7 +272,6 @@ def _create_wrappers (namespace):
     unary and binary math functions.
 
     """
-
     for name in all_unary_funcs:
         namespace[name] = partial (_dispatch_unary_function, name)
 
@@ -381,10 +315,16 @@ class MathlibDelegatingObject (object):
     """
     _pk_mathlib_library_ = None
 
+    __array_priority__ = 2000
+    """This tells Numpy that our multiplication function should be used when
+    evaluating, say, ``np.linspace(n) * delegating_object``. Plain ndarrays
+    have priority 0; Pandas series have priority 1000.
+
+    """
     # https://docs.python.org/2/reference/datamodel.html#basic-customization
 
     def __dispatch_binary (self, name, other):
-        return _dispatch_binary_function (name, self, other)
+        return getattr (get_library_for (self, other), name) (self, other)
 
     __lt__ = partialmethod (__dispatch_binary, 'less')
     __le__ = partialmethod (__dispatch_binary, 'less_equal')
@@ -405,7 +345,7 @@ class MathlibDelegatingObject (object):
     def __pow__ (self, other, modulo=None):
         if modulo is not None:
             raise NotImplementedError ()
-        return _dispatch_binary_function ('power', self, other)
+        return getattr (get_library_for (self, other), 'power') (self, other)
 
     __lshift__ = partialmethod (__dispatch_binary, 'left_shift')
     __rshift__ = partialmethod (__dispatch_binary, 'right_shift')
@@ -416,7 +356,7 @@ class MathlibDelegatingObject (object):
     __truediv__ = partialmethod (__dispatch_binary, 'true_divide')
 
     def __dispatch_binary_reflected (self, name, other):
-        return _dispatch_binary_function (name, other, self)
+        return getattr (get_library_for (other, self), name) (other, self)
 
     __radd__ = partialmethod (__dispatch_binary_reflected, 'add')
     __rsub__ = partialmethod (__dispatch_binary_reflected, 'subtract')
@@ -430,7 +370,7 @@ class MathlibDelegatingObject (object):
     def __rpow__ (self, other, modulo=None):
         if modulo is not None:
             raise NotImplementedError ()
-        return _dispatch_binary_function ('power', other, self)
+        return getattr (get_library_for (self, other), 'power') (other, self)
 
     __rlshift__ = partialmethod (__dispatch_binary_reflected, 'left_shift')
     __rrshift__ = partialmethod (__dispatch_binary_reflected, 'right_shift')
@@ -439,7 +379,7 @@ class MathlibDelegatingObject (object):
     __ror__ = partialmethod (__dispatch_binary_reflected, 'bitwise_or')
 
     def __dispatch_binary_inplace (self, name, other):
-        return _dispatch_binary_function (name, self, other, self)
+        return getattr (get_library_for (self, other), name) (self, other, self)
 
     __iadd__ = partialmethod (__dispatch_binary_inplace, 'add')
     __isub__ = partialmethod (__dispatch_binary_inplace, 'subtract')
@@ -453,7 +393,7 @@ class MathlibDelegatingObject (object):
     def __ipow__ (self, other, modulo=None):
         if modulo is not None:
             raise NotImplementedError ()
-        return _dispatch_binary_function ('power', self, other, self)
+        return getattr (get_library_for (self, other), 'power') (self, other, self)
 
     __ilshift__ = partialmethod (__dispatch_binary_inplace, 'left_shift')
     __irshift__ = partialmethod (__dispatch_binary_inplace, 'right_shift')
@@ -474,57 +414,53 @@ class MathlibDelegatingObject (object):
         return self._pk_mathlib_library_.bitwise_not (self)
 
 
-class MathlibDelegatingWrapper (MathlibDelegatingObject):
-    """This class is kind of trivial, except that it inherits from
-    :class:`MathlibDelegatingObject` and so it gets all of the standard math
-    operators implemented on it with correct coercion and delegation, for
-    free.
+
+
+class TidiedFunctionLibraryMeta (MathFunctionLibraryMeta):
+    # How often do you ever see metaclass inheritance? Not often.
+    def __new__ (cls, name, parents, dct):
+        generic = metaclass_lookup_attribute ('generic_tidy_unary', dct, parents)
+
+        for opname in all_unary_funcs:
+            metaclass_maybe_add_generic_impl ('tidy_'+opname, dct, parents, generic)
+
+        generic = metaclass_lookup_attribute ('generic_tidy_binary', dct, parents)
+
+        for opname in all_binary_funcs:
+            metaclass_maybe_add_generic_impl ('tidy_'+opname, dct, parents, generic)
+
+        return super (TidiedFunctionLibraryMeta, cls).__new__ (cls, name, parents, dct)
+
+
+class TidiedFunctionLibrary (six.with_metaclass (TidiedFunctionLibraryMeta, MathFunctionLibrary)):
+    """These function libraries need only implement "tidied" versions of the math
+    functions, which can assume that the *out* argument is not None and that
+    all arguments have been coerced to uniform types.
 
     """
-    def __init__ (self, data):
-        self._mathlib_data = data
+    def generic_tidy_unary (self, opname, x, out):
+        raise NotImplementedError ('math function "%s" not implemented for objects of type "%s" in %s'
+                                   % (opname, x.__class__.__name__, self))
 
-    @classmethod
-    def _pk_mathlib_rewrap_ (cls, data):
-        return cls (data)
+    def generic_tidy_binary (self, opname, x, y, out):
+        raise NotImplementedError ('math function "%s" not implemented for objects of types "%s" '
+                                   'and "%s" in %s' % (opname, x.__class__.__name__,
+                                                       y.__class__.__name__, self))
 
-    def _pk_mathlib_unwrap_ (self):
-        return self._mathlib_data
+    def coerce (self, x, y=None, out=None):
+        raise NotImplementedError ()
 
+    def empty_like_broadcasted (self, x, y=None):
+        raise NotImplementedError ()
 
-
-
-class _AlwaysOutFunctionLibraryBase (MathFunctionLibrary):
-    def __init__ (self, sub_library):
-        self.sub_library = sub_library
-
-    def accepts (self, opname, other):
-        return self.sub_library.accepts (opname, other)
-
-    def _delegate_unary (self, name, x, out=None):
-        x, _, out = self.sub_library.coerce (x, None, out)
+    def generic_unary (self, opname, x, out=None):
+        x, _, out = self.coerce (x, None, out)
         if out is None:
-            out = self.sub_library.empty_like_broadcasted (x)
-        getattr (self.sub_library, name) (x, out)
-        return out
+            out = self.empty_like_broadcasted (x)
+        return getattr (self, 'tidy_' + opname) (x, out)
 
-    def _delegate_binary (self, name, x, y, out=None):
-        x, y, out = self.sub_library.coerce (x, y, out)
+    def generic_binary (self, opname, x, y, out=None):
+        x, y, out = self.coerce (x, y, out)
         if out is None:
-            out = self.sub_library.empty_like_broadcasted (x, y)
-        getattr (self.sub_library, name) (x, y, out)
-        return out
-
-
-def _make_always_out_library_type ():
-    items = {}
-
-    for name in all_unary_funcs:
-        items[name] = partialmethod (_AlwaysOutFunctionLibraryBase._delegate_unary, name)
-
-    for name in all_binary_funcs:
-        items[name] = partialmethod (_AlwaysOutFunctionLibraryBase._delegate_binary, name)
-
-    return type (str('AlwaysOutFunctionLibrary'), (_AlwaysOutFunctionLibraryBase,), items)
-
-AlwaysOutFunctionLibrary = _make_always_out_library_type ()
+            out = self.empty_like_broadcasted (x, y)
+        return getattr (self, 'tidy_' + opname) (x, y, out)

@@ -20,7 +20,7 @@ from collections import OrderedDict
 from six.moves import range
 import numpy as np
 from .oo_helpers import indexerproperty
-from .mathlib import MathlibDelegatingObject
+from .mathlib import MathlibDelegatingObject, TidiedFunctionLibrary, get_library_for, numpy_types
 
 
 def _is_sequence (thing):
@@ -82,6 +82,9 @@ class PKTable (object):
         if not ncol:
             return 0, 0
         return ncol, len (iter (six.viewvalues (self._data)).next ())
+
+
+    __hash__ = None # mutable container => should not be hashable
 
 
     def __len__ (self):
@@ -158,6 +161,9 @@ class PKTable (object):
             self._data[colname][rowkey] = subval
 
 
+    __array_priority__ = 2000
+
+
     # Stringification. TODO: a "hiding" mechanism where the user can cause
     # columns not to be shown in the stringification, for focusing on a few
     # particular columns in a large table.
@@ -228,6 +234,8 @@ class _PKTableColumnsHelper (object):
 
     def __iter__ (self):
         return iter (self._data)
+
+    __hash__ = None
 
 
     def _fetch_columns (self, key):
@@ -317,7 +325,7 @@ class _PKTableColumnsHelper (object):
 
             from .msmt import MeasurementABC
             if isinstance (sval, MeasurementABC):
-                arrayish_factory = MeasurementColumn._pk_mathlib_rewrap_
+                arrayish_factory = MeasurementColumn.new_from_data
                 arrayish_data = sval
 
             # Nothing specific worked. Last-ditch effort: np.asarray(). This
@@ -333,7 +341,7 @@ class _PKTableColumnsHelper (object):
                 arrayish_data = try_asarray (sval)
                 if arrayish_data is None:
                     raise ValueError ('unhandled PKTable column value %r for %r' % (sval, skey))
-                arrayish_factory = ScalarColumn._pk_mathlib_rewrap_
+                arrayish_factory = ScalarColumn.new_from_data
 
             # At this point arrayish_{factory,data} have been set and we can use
             # our generic infrastructure.
@@ -395,6 +403,8 @@ class _PKTableRowsHelper (object):
 
     def __iter__ (self):
         return range (len (self))
+
+    __hash__ = None
 
 
     def _fetch_rows (self, key):
@@ -492,6 +502,8 @@ class _PKTableRowProxy (object):
     def __len__ (self):
         return len (self._data)
 
+    __hash__ = None
+
     def __getitem__ (self, key):
         """We only allow scalar access here."""
         return self._data[key][self._idx]
@@ -511,6 +523,8 @@ class _PKTableRowProxy (object):
 # Actual column types
 
 class PKTableColumnABC (six.with_metaclass (abc.ABCMeta, object)):
+    __hash__ = None
+
     def __len__ (self):
         raise NotImplementedError ()
 
@@ -684,6 +698,8 @@ class _PKTableFancyIndexedColumnView (PKTableColumnABC):
         return 'fancy-index view of %s' % self._parent._coldesc_for_repr ()
 
 
+
+
 class ScalarColumn (PKTableColumnABC, MathlibDelegatingObject):
     _data = None
     "The actual array data."
@@ -705,24 +721,40 @@ class ScalarColumn (PKTableColumnABC, MathlibDelegatingObject):
                 fillval = 0
             self._data.fill (fillval)
 
+    @classmethod
+    def new_like (cls, other, length=None, dtype=None):
+        if length is None:
+            length = len (other)
+        if dtype is None:
+            dtype = other.dtype
+
+        return cls (length, dtype=dtype)
 
     @classmethod
-    def _pk_mathlib_rewrap_ (cls, data):
-        return cls (None, _data=data)
+    def new_from_data (cls, data, copy=True):
+        from .numutil import try_asarray
+        a = try_asarray (data)
+        if a is None:
+            raise ValueError ('cannot convert data %r to a Numpy array' % data)
+        if a.ndim != 1:
+            raise ValueError ('input data array must be one-dimensional; got %r' % data)
 
-    def _pk_mathlib_unwrap_ (self):
-        return self._data
+        if copy:
+            a = a.copy ()
 
+        return cls (None, _data=a)
+
+    @property
+    def dtype (self):
+        return self._data.dtype
+
+    # Indexing.
 
     def __len__ (self):
         return len (self._data)
 
-
     def __iter__ (self):
         return iter (self._data)
-
-
-    # Indexing.
 
     def _get_index (self, idx):
         return self._data[idx]
@@ -741,6 +773,58 @@ class ScalarColumn (PKTableColumnABC, MathlibDelegatingObject):
 
     def __setitem__ (self, key, value):
         self._data[key] = value
+
+
+class PKColumnFunctionLibrary (TidiedFunctionLibrary):
+    def __init__ (self, coltype):
+        self.coltype = coltype
+
+    def accepts (self, opname, other):
+        return isinstance (other, numpy_types + (self.coltype,))
+
+    def _coerce_one (self, v):
+        if v is None:
+            return v
+
+        if isinstance (v, self.coltype):
+            return v
+
+        return self.coltype (None, _data=np.asarray (v))
+
+    def coerce (self, x, y=None, out=None):
+        return self._coerce_one (x), self._coerce_one (y), self._coerce_one (out)
+
+    def empty_like_broadcasted (self, x, y=None):
+        if y is None:
+            shape = x._data.shape
+            dtype = x._data.dtype
+        else:
+            shape = np.broadcast (x._data, y._data).shape
+            dtype = np.result_type (x._data.dtype, y._data.dtype)
+
+        if len (shape) != 1:
+            raise TypeError ('math with PKTableColumns may only yield 1-dimensional '
+                             'arrays; got %r' % shape)
+
+        return self.coltype.new_like (x, dtype=dtype, length=shape[0])
+
+    def generic_tidy_unary (self, opname, x, out):
+        dlib = get_library_for (x._data)
+        # ``[5:]`` strips the tidy_ prefix
+        getattr (dlib, opname[5:]) (x._data, out._data)
+        return out
+
+    def generic_tidy_binary (self, opname, x, y, out):
+        dlib = get_library_for (x._data, y._data)
+        # ``[5:]`` strips the tidy_ prefix
+        getattr (dlib, opname[5:]) (x._data, y._data, out._data)
+        return out
+
+
+scalar_column_function_library = PKColumnFunctionLibrary (ScalarColumn)
+ScalarColumn._pk_mathlib_library_ = scalar_column_function_library
+
+
 
 
 class MeasurementColumn (PKTableColumnABC, MathlibDelegatingObject):
@@ -782,13 +866,28 @@ class MeasurementColumn (PKTableColumnABC, MathlibDelegatingObject):
 
         self._data = cls (domain, (length,), **kwargs)
 
+    @classmethod
+    def new_like (cls, other, length=None, dtype=None):
+        if length is None:
+            length = len (other)
+        if dtype is None:
+            dtype = other.dtype
+
+        return cls (length, type=other.type, domain=other.domain, dtype=dtype)
 
     @classmethod
-    def _pk_mathlib_rewrap_ (cls, data):
-        return cls (None, _data=data)
+    def new_from_data (cls, data, copy=True):
+        from .msmt import try_as_measurement
+        m = try_as_measurement (data)
+        if m is None:
+            raise ValueError ('cannot convert data %r to a Measurement' % data)
+        if m.ndim != 1:
+            raise ValueError ('input data must be one-dimensional; got %r' % data)
 
-    def _pk_mathlib_unwrap_ (self):
-        return self._data
+        if copy:
+            m = m.copy ()
+
+        return cls (None, _data=m)
 
 
     def __len__ (self):
@@ -805,17 +904,18 @@ class MeasurementColumn (PKTableColumnABC, MathlibDelegatingObject):
 
     def _coldesc_for_repr (self):
         from .msmt import Domain
-
-        type = '[unknown type!]'
-        for tname, tclass in six.viewitems (self._measurement_types):
-            if tclass == self._data.__class__:
-                type = tname
-                break
-
-        return '%s %s %s' % (Domain.names[self._data.domain], type, self.__class__.__name__)
+        return '%s %s %s' % (Domain.names[self._data.domain], self.type, self.__class__.__name__)
 
 
     # Wrapping Measurement features.
+
+    @property
+    def type (self):
+        for tname, tclass in six.viewitems (self._measurement_types):
+            if tclass == self._data.__class__:
+                return tname
+
+        raise AttributeError ('unknown measurement type class %s' % self._data.__class__.__name__)
 
     @property
     def domain (self):
@@ -827,8 +927,8 @@ class MeasurementColumn (PKTableColumnABC, MathlibDelegatingObject):
         self._data.domain = Domain.normalize (domain)
 
     @property
-    def sample_dtype (self):
-        return self._data.sample_dtype
+    def dtype (self):
+        return self._data.dtype
 
     def lt (self, other, **kwargs):
         return self._data.lt (other, **kwargs)
@@ -851,6 +951,47 @@ class MeasurementColumn (PKTableColumnABC, MathlibDelegatingObject):
 
     def __setitem__ (self, key, value):
         self._data[key] = value
+
+
+class MeasurementColumnFunctionLibrary (PKColumnFunctionLibrary):
+    def __init__ (self):
+        super (MeasurementColumnFunctionLibrary, self).__init__ (MeasurementColumn)
+
+    def accepts (self, opname, other):
+        from .msmt import Approximate, Sampled
+        return isinstance (other, numpy_types + (self.coltype, Approximate, Sampled))
+
+    def _coerce_one (self, v):
+        if v is None:
+            return v
+
+        if isinstance (v, self.coltype):
+            return v
+
+        from .msmt import Approximate, Sampled
+
+        if isinstance (v, (Approximate, Sampled)):
+            return self.coltype (None, _data=v)
+
+        return self.coltype (None, _data=Approximate.from_other (v))
+
+    def power (self, x, y, out=None):
+        """We need to wrap this specially since Measurements are restrictive about
+        what values you can pass to their power() functions.
+
+        """
+        if isinstance (x, MeasurementColumn):
+            x = x._data
+        if isinstance (y, MeasurementColumn):
+            y = y._data
+
+        dlib = get_library_for (x, y)
+        return getattr (dlib, 'power') (x, y, out)
+
+measurement_column_function_library = MeasurementColumnFunctionLibrary ()
+MeasurementColumn._pk_mathlib_library_ = measurement_column_function_library
+
+
 
 
 class CoordColumn (PKTableColumnABC):

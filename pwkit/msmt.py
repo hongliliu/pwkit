@@ -14,7 +14,6 @@ Kind
 
 MeasurementABC
 MeasurementFunctionLibrary
-ScalarPowFunctionLibrary
 
 sampled_n_samples
 SampledDtypeGenerator
@@ -26,6 +25,8 @@ ApproximateDtypeGenerator
 get_approximate_dtype
 Approximate
 approximate_function_library
+
+try_as_measurement
 ''').split ()
 
 import abc, operator, six
@@ -35,7 +36,7 @@ import numpy as np
 from . import PKError, unicode_to_str
 from .simpleenum import enumeration
 from .numutil import broadcastize, try_asarray
-from .mathlib import MathFunctionLibrary, MathlibDelegatingObject, AlwaysOutFunctionLibrary, numpy_types
+from .mathlib import TidiedFunctionLibrary, MathlibDelegatingObject, numpy_types
 
 
 
@@ -176,7 +177,7 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, MathlibDelegatingObject))
     """A an array of measurements that may be uncertain or limits.
 
     """
-    __slots__ = ('domain', 'data', '_scalar', '_pk_mathlib_library_')
+    __slots__ = ('domain', 'data', '_scalar')
 
     @classmethod
     def from_other (cls, v, copy=True, domain=None):
@@ -197,6 +198,8 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, MathlibDelegatingObject))
 
     def copy (self):
         return self.__class__._from_data (self.domain, self.data.copy ())
+
+    __hash__ = None # mutable container => should not be hashable
 
 
     # Basic array properties
@@ -290,7 +293,7 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, MathlibDelegatingObject))
         raise NotImplementedError ()
 
 
-class MeasurementFunctionLibrary (MathFunctionLibrary):
+class MeasurementFunctionLibrary (TidiedFunctionLibrary):
     """This function library implements as much basic algebra as it can
     in terms of the following fundamental operations:
 
@@ -300,10 +303,6 @@ class MeasurementFunctionLibrary (MathFunctionLibrary):
     - multiply
     - negative
     - reciprocal
-
-    This class must be wrapped in :class:`ScalarPowFunctionLibrary` so that
-    the `out` parameter always exists when these functions get called, plus
-    ther `power` operation can be defined specially.
 
     """
     def empty_like_broadcasted (self, x, y=None):
@@ -333,10 +332,12 @@ class MeasurementFunctionLibrary (MathFunctionLibrary):
         """
         raise NotImplementedError ()
 
+
     def coerce (self, x, y=None, out=None):
         return self.coerce_one (x), self.coerce_one (y), self.coerce_one (out)
 
-    def expm1 (self, x, out):
+
+    def tidy_expm1 (self, x, out):
         """The whole point of this function is that non-naive implementations can
         achieve higher precision, so this naive implementation is not going to be
         that useful.
@@ -346,12 +347,14 @@ class MeasurementFunctionLibrary (MathFunctionLibrary):
         self.subtract (out, 1, out)
         return out
 
-    def log10 (self, x, out):
+
+    def tidy_log10 (self, x, out):
         self.log (x, out)
-        self.true_divide (out, self.coerce_one (np.log (10)), out)
+        self.true_divide (out, np.log (10), out)
         return out
 
-    def log1p (self, x, out):
+
+    def tidy_log1p (self, x, out):
         """The whole point of this function is that non-naive implementations can
         achieve higher precision, so this naive implementation is not going to be
         that useful.
@@ -361,45 +364,24 @@ class MeasurementFunctionLibrary (MathFunctionLibrary):
         self.log (out, out)
         return out
 
-    def log2 (self, x, out):
+
+    def tidy_log2 (self, x, out):
         self.log (x, out)
-        self.true_divide (out, self.coerce_one (np.log (2)), out)
-        return out
-
-    def sqrt (self, x, out):
-        self.power (x, 0.5, out)
-        return out
-
-    def square (self, x, out):
-        self.power (x, 2, out)
-        return out
-
-    def subtract (self, x, y, out):
-        # We have to allocate a temporary in case `x is out`. Or you know we could
-        # just implement the function.
-        temp = self.empty_like_broadcasted (y)
-        self.negative (y, temp)
-        self.add (x, temp, out)
-        return out
-
-    def true_divide (self, x, y, out):
-        # We have to allocate a temporary in case `x is out`. Or you know we could
-        # just implement the function.
-        temp = self.empty_like_broadcasted (y)
-        self.reciprocal (y, temp)
-        self.multiply (x, temp, out)
+        self.true_divide (out, np.log (2), out)
         return out
 
 
-class ScalarPowFunctionLibrary (AlwaysOutFunctionLibrary):
-    def power (self, x, y, out):
+    def power (self, x, y, out=None):
+        # Note that this is intentionally not a "tidy" function because we
+        # don't want automatic coercion of the arguments to a common type.
+
         try:
             v = float (x)
             # If we didn't just raise an exception, this is the __rpow__ case.
             # You might not think that this is common functionality, but it's
             # important for undoing logarithms; i.e. 10**x.
             if out is None:
-                out = self.sub_library.empty_like_broadcasted (y)
+                out = self.empty_like_broadcasted (y)
             self.multiply (y, np.log (v), out)
             self.exp (out, out)
             return out
@@ -412,10 +394,10 @@ class ScalarPowFunctionLibrary (AlwaysOutFunctionLibrary):
             raise ValueError ('measurements can only be exponentiated by exact values')
 
         if out is None:
-            out = self.sub_library.empty_like_broadcasted (x)
+            out = self.empty_like_broadcasted (x)
 
         if v == 0:
-            self.sub_library.fill_unity_like (x, out)
+            self.fill_unity_like (x, out)
             return out
 
         reciprocate = (v < 0)
@@ -434,12 +416,40 @@ class ScalarPowFunctionLibrary (AlwaysOutFunctionLibrary):
             # that we can work with negative values (which the log/exp
             # approach can't). Not the most efficient, but reduces the chance
             # for bugs.
-            self.sub_library.fill_from_broadcasted (x, out)
+            self.fill_from_broadcasted (x, out)
             for _ in range (i - 1):
                 self.multiply (out, x, out)
 
         if reciprocate:
             self.reciprocal (out, out)
+        return out
+
+
+    def tidy_sqrt (self, x, out):
+        self.power (x, 0.5, out)
+        return out
+
+
+    def tidy_square (self, x, out):
+        self.power (x, 2, out)
+        return out
+
+
+    def tidy_subtract (self, x, y, out):
+        # We have to allocate a temporary in case `x is out`. Or you know we could
+        # just implement the function.
+        temp = self.empty_like_broadcasted (y)
+        self.negative (y, temp)
+        self.add (x, temp, out)
+        return out
+
+
+    def tidy_true_divide (self, x, y, out):
+        # We have to allocate a temporary in case `x is out`. Or you know we could
+        # just implement the function.
+        temp = self.empty_like_broadcasted (y)
+        self.reciprocal (y, temp)
+        self.multiply (x, temp, out)
         return out
 
 
@@ -480,8 +490,7 @@ class Sampled (MeasurementABC):
     """An empirical uncertain value, represented by samples.
 
     """
-    def __init__ (self, domain, shape, sample_dtype=np.double, _noalloc=False, _noinit=False):
-        self._pk_mathlib_library_ = sampled_function_library
+    def __init__ (self, domain, shape, dtype=np.double, _noalloc=False, _noinit=False):
         self.domain = Domain.normalize (domain)
 
         if _noalloc:
@@ -491,7 +500,7 @@ class Sampled (MeasurementABC):
         # implement a lot of our math. So we store scalars as shape (1,) and
         # fake the outer parts.
 
-        self.data = np.empty (shape, dtype=get_sampled_dtype (sample_dtype))
+        self.data = np.empty (shape, dtype=get_sampled_dtype (dtype))
         self._scalar = (self.data.shape == ())
 
         if self._scalar:
@@ -559,7 +568,7 @@ class Sampled (MeasurementABC):
     # (Additional) basic array properties
 
     @property
-    def sample_dtype (self):
+    def dtype (self):
         return self.data.dtype['samples'].base
 
 
@@ -621,12 +630,12 @@ class SampledFunctionLibrary (MeasurementFunctionLibrary):
     def empty_like_broadcasted (self, x, y=None):
         if y is None:
             shape = x.shape
-            sdtype = x.sample_dtype
+            sdtype = x.dtype
         else:
             shape = np.broadcast (x, y).shape
-            sdtype = np.result_type (x.sample_dtype, y.sample_dtype)
+            sdtype = np.result_type (x.dtype, y.dtype)
 
-        return Sampled (Domain.anything, shape, sample_dtype=sdtype, _noinit=True)
+        return Sampled (Domain.anything, shape, dtype=sdtype, _noinit=True)
 
 
     def fill_from_broadcasted (self, x, out):
@@ -647,21 +656,21 @@ class SampledFunctionLibrary (MeasurementFunctionLibrary):
 
     # The actual core math functions
 
-    def add (self, x, y, out):
+    def tidy_add (self, x, y, out):
         out.domain = Domain.add[_ordpair (x.domain, y.domain)]
         out.data['kind'] = Kind.add[Kind.binop (x.data['kind'], y.data['kind'])]
         np.add (x.data['samples'], y.data['samples'], out.data['samples'])
         return out
 
 
-    def exp (self, x, out):
+    def tidy_exp (self, x, out):
         out.domain = Domain.nonnegative
         out.data['kind'] = x.data['kind']
         np.exp (x.data['samples'], out.data['samples'])
         return out
 
 
-    def log (self, x, out):
+    def tidy_log (self, x, out):
         # Remember that we may have `x is kind`!
         out.data['kind'] = x.data['kind']
         np.log (x.data['samples'], out.data['samples'])
@@ -675,7 +684,7 @@ class SampledFunctionLibrary (MeasurementFunctionLibrary):
         return out
 
 
-    def multiply (self, x, y, out):
+    def tidy_multiply (self, x, y, out):
         out.domain = Domain.mul[_ordpair (x.domain, y.domain)]
 
         # There's probably a smarter way to make sure that we get the limit
@@ -697,14 +706,14 @@ class SampledFunctionLibrary (MeasurementFunctionLibrary):
         return out
 
 
-    def negative (self, x, out):
+    def tidy_negative (self, x, out):
         out.domain = Domain.negate[x.domain]
         out.data['kind'] = Kind.negate[x.data['kind']]
         np.negative (x.data['samples'], out.data['samples'])
         return out
 
 
-    def reciprocal (self, x, out):
+    def tidy_reciprocal (self, x, out):
         out.domain = x.domain
         out.data['kind'] = Kind.reciprocal[x.data['kind']]
         # np.reciprocal() truncates integers, which we don't want
@@ -712,7 +721,8 @@ class SampledFunctionLibrary (MeasurementFunctionLibrary):
         return out
 
 
-sampled_function_library = ScalarPowFunctionLibrary (SampledFunctionLibrary ())
+sampled_function_library = SampledFunctionLibrary ()
+Sampled._pk_mathlib_library_ = sampled_function_library
 
 
 
@@ -750,8 +760,7 @@ class Approximate (MeasurementABC):
     """An approximate uncertain value, represented with a scalar uncertainty parameter.
 
     """
-    def __init__ (self, domain, shape, sample_dtype=np.double, _noalloc=False, _noinit=False):
-        self._pk_mathlib_library_ = approximate_function_library
+    def __init__ (self, domain, shape, dtype=np.double, _noalloc=False, _noinit=False):
         self.domain = Domain.normalize (domain)
 
         if _noalloc:
@@ -761,7 +770,7 @@ class Approximate (MeasurementABC):
         # implement a lot of our math. So we store scalars as shape (1,) and
         # fake the outer parts.
 
-        self.data = np.empty (shape, dtype=get_approximate_dtype (sample_dtype))
+        self.data = np.empty (shape, dtype=get_approximate_dtype (dtype))
         self._scalar = (self.data.shape == ())
 
         if self._scalar:
@@ -825,7 +834,7 @@ class Approximate (MeasurementABC):
     # (Additional) basic array properties
 
     @property
-    def sample_dtype (self):
+    def dtype (self):
         return self.data.dtype['x']
 
 
@@ -986,12 +995,12 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
     def empty_like_broadcasted (self, x, y=None):
         if y is None:
             shape = x.shape
-            sdtype = x.sample_dtype
+            sdtype = x.dtype
         else:
             shape = np.broadcast (x, y).shape
-            sdtype = np.result_type (x.sample_dtype, y.sample_dtype)
+            sdtype = np.result_type (x.dtype, y.dtype)
 
-        return Approximate (Domain.anything, shape, sample_dtype=sdtype, _noinit=True)
+        return Approximate (Domain.anything, shape, dtype=sdtype, _noinit=True)
 
 
     def fill_from_broadcasted (self, x, out):
@@ -1015,15 +1024,15 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
 
     # The actual core math functions
 
-    def add (self, x, y, out):
+    def tidy_add (self, x, y, out):
         out.domain = Domain.add[_ordpair (x.domain, y.domain)]
         out.data['kind'] = Kind.add[Kind.binop (x.data['kind'], y.data['kind'])]
         np.add (x.data['x'], y.data['x'], out.data['x'])
-        np.sqrt (x.data['u']**2 + y.data['x']**2, out.data['u'])
+        np.sqrt (x.data['u']**2 + y.data['u']**2, out.data['u'])
         return out
 
 
-    def exp (self, x, out):
+    def tidy_exp (self, x, out):
         out.domain = Domain.nonnegative
         out.data['kind'] = x.data['kind']
         np.multiply (x.data['u'], x.data['x'], out.data['u'])
@@ -1031,8 +1040,8 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
         return out
 
 
-    def log (self, x, out):
-        # Remember that we may have `x is kind`!
+    def tidy_log (self, x, out):
+        # Remember that we may have `x is out`!
         out.data['kind'] = x.data['kind']
 
         if x.domain == Domain.nonnegative:
@@ -1052,7 +1061,7 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
         return out
 
 
-    def multiply (self, x, y, out):
+    def tidy_multiply (self, x, y, out):
         out.domain = Domain.mul[_ordpair (x.domain, y.domain)]
 
         # There's probably a smarter way to make sure that we get the limit
@@ -1075,7 +1084,7 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
         return out
 
 
-    def negative (self, x, out):
+    def tidy_negative (self, x, out):
         out.domain = Domain.negate[x.domain]
         out.data['kind'] = Kind.negate[x.data['kind']]
         np.negative (x.data['x'], out.data['x'])
@@ -1083,7 +1092,7 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
         return out
 
 
-    def reciprocal (self, x, out):
+    def tidy_reciprocal (self, x, out):
         out.domain = x.domain
         out.data['kind'] = Kind.reciprocal[x.data['kind']]
         # np.reciprocal() truncates integers, which we don't want
@@ -1092,4 +1101,19 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
         return out
 
 
-approximate_function_library = ScalarPowFunctionLibrary (ApproximateFunctionLibrary ())
+approximate_function_library = ApproximateFunctionLibrary ()
+Approximate._pk_mathlib_library_ = approximate_function_library
+
+
+
+
+def try_as_measurement (thing):
+    if isinstance (thing, MeasurementABC):
+        return thing
+
+    from numutil import try_asarray
+    a = try_asarray (thing)
+    if a is not None:
+        return Approximate.from_other (a)
+
+    raise ValueError ('do not know how to convert %r to a Measurement' % thing)
