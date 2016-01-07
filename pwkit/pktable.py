@@ -651,10 +651,12 @@ class _PKTableSlicedColumnView (PKTableColumnABC):
     _start = None
     _stop = None
     _stride = None
+    _slice = None
 
-    def __init__ (self, parent, slice):
+    def __init__ (self, parent, sliceobj):
         self._parent = parent
-        self._start, self._stop, self._stride = slice.indices (len (parent))
+        self._start, self._stop, self._stride = sliceobj.indices (len (parent))
+        self._slice = slice (self._start, self._stop, self._stride)
 
     def __len__ (self):
         return (self._stop - self._start) // self._stride
@@ -670,6 +672,28 @@ class _PKTableSlicedColumnView (PKTableColumnABC):
 
     def _coldesc_for_repr (self):
         return 'slice view of %s' % self._parent._coldesc_for_repr ()
+
+    def _maybe_inflate (self, thing):
+        if np.isscalar (thing):
+            return thing
+
+        # TODO: mathlib-ify
+        inflated = np.empty (shape=(len (self._parent),), dtype=thing.dtype)
+        inflated.fill (np.nan)
+        inflated[self._slice] = thing
+        return inflated
+
+    def lt (self, other, **kwargs):
+        return self._parent.lt (self._maybe_inflate (other), **kwargs)[self._slice]
+
+    def gt (self, other, **kwargs):
+        return self._parent.gt (self._maybe_inflate (other), **kwargs)[self._slice]
+
+    def repvals (self, **kwargs):
+        return self._parent.repvals (**kwargs)[self._slice]
+
+    def cmask (self, **kwargs):
+        return self._parent.cmask (**kwargs)[self._slice]
 
 
 class _PKTableFancyIndexedColumnView (PKTableColumnABC):
@@ -696,6 +720,28 @@ class _PKTableFancyIndexedColumnView (PKTableColumnABC):
 
     def _coldesc_for_repr (self):
         return 'fancy-index view of %s' % self._parent._coldesc_for_repr ()
+
+    def _maybe_inflate (self, thing):
+        if np.isscalar (thing):
+            return thing
+
+        # TODO: mathlib-ify
+        inflated = np.empty (shape=(len (self._parent),), dtype=thing.dtype)
+        inflated.fill (np.nan)
+        inflated[self._index] = thing
+        return inflated
+
+    def lt (self, other, **kwargs):
+        return self._parent.lt (self._maybe_inflate (other), **kwargs)[self._index]
+
+    def gt (self, other, **kwargs):
+        return self._parent.gt (self._maybe_inflate (other), **kwargs)[self._index]
+
+    def repvals (self, **kwargs):
+        return self._parent.repvals (**kwargs)[self._index]
+
+    def cmask (self, **kwargs):
+        return self._parent.cmask (**kwargs)[self._index]
 
 
 
@@ -747,6 +793,18 @@ class ScalarColumn (PKTableColumnABC, MathlibDelegatingObject):
     @property
     def dtype (self):
         return self._data.dtype
+
+    def lt (self, other, **kwargs):
+        return self._data.lt (other, **kwargs)
+
+    def gt (self, other, **kwargs):
+        return self._data.gt (other, **kwargs)
+
+    def repvals (self, **kwargs):
+        return self._data.repvals (**kwargs)
+
+    def cmask (self, **kwargs):
+        return self._data.cmask (**kwargs)
 
     # Indexing.
 
