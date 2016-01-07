@@ -127,6 +127,7 @@ true_divide
 
 
 all_unary_funcs = numpy_unary_ufuncs + str('''
+cmask
 repvals
 ''').split ()
 
@@ -211,6 +212,25 @@ numpy_types = np.ScalarType + (np.generic, np.chararray, np.ndarray, np.recarray
 class NumpyFunctionLibrary (MathFunctionLibrary):
     def accepts (self, opname, other):
         return isinstance (other, numpy_types)
+
+    def cmask (self, x, out=None, welldefined=False, finite=False):
+        scalar = np.isscalar (x)
+        x = np.atleast_1d (np.asarray (x))
+
+        if out is None:
+            out = np.empty (x.shape, dtype=np.bool)
+
+        out.fill (True)
+
+        if welldefined:
+            np.logical_and (out, ~np.isnan (x), out)
+
+        if finite:
+            np.logical_and (out, np.isfinite (x), out)
+
+        if scalar:
+            return np.asscalar (out)
+        return out
 
     def repvals (self, x, out=None):
         if out is None:
@@ -443,8 +463,9 @@ class TidiedFunctionLibraryMeta (MathFunctionLibraryMeta):
 
 class TidiedFunctionLibrary (six.with_metaclass (TidiedFunctionLibraryMeta, MathFunctionLibrary)):
     """These function libraries need only implement "tidied" versions of the math
-    functions, which can assume that the *out* argument is not None and that
-    all arguments have been coerced to uniform types.
+    functions, which can assume that the *out* argument is not None; that all
+    arguments have been coerced to uniform types as much as possible; and that
+    the arguments are not scalars and so can be indexed like arrays.
 
     """
     def generic_tidy_unary (self, opname, x, out, **kwargs):
@@ -462,14 +483,46 @@ class TidiedFunctionLibrary (six.with_metaclass (TidiedFunctionLibraryMeta, Math
     def make_output_array (self, opname, x, y=None):
         raise NotImplementedError ()
 
+    def is_scalar (self, x):
+        return (x.shape == ())
+
+    def atleast_1d (self, x):
+        return x.reshape ((1,))
+
+    def asscalar (self, x):
+        if x.shape == ():
+            return x
+        if x.shape != (1,):
+            raise ValueError ('can only call asscalar() on shape (1,) objects; got %r' % (x.shape,))
+        return x[0]
+
     def generic_unary (self, opname, x, out=None, **kwargs):
         x, _, out = self.coerce (opname, x, None, out)
+
+        scalar = self.is_scalar (x)
+        if scalar:
+            x = self.atleast_1d (x)
         if out is None:
             out = self.make_output_array (opname, x)
-        return getattr (self, 'tidy_' + opname) (x, out, **kwargs)
+
+        getattr (self, 'tidy_' + opname) (x, out, **kwargs)
+
+        if scalar:
+            return self.asscalar (out)
+        return out
 
     def generic_binary (self, opname, x, y, out=None, **kwargs):
         x, y, out = self.coerce (opname, x, y, out)
+
+        scalar = self.is_scalar (x) and self.is_scalar (y)
+        if scalar:
+            x = self.atleast_1d (x)
+            y = self.atleast_1d (y)
         if out is None:
             out = self.make_output_array (opname, x, y)
-        return getattr (self, 'tidy_' + opname) (x, y, out, **kwargs)
+
+        getattr (self, 'tidy_' + opname) (x, y, out, **kwargs)
+
+        if scalar:
+            return self.asscalar (out)
+        return out

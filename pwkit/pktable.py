@@ -794,6 +794,12 @@ class PKColumnFunctionLibrary (TidiedFunctionLibrary):
     def coerce (self, opname, x, y=None, out=None):
         return self._coerce_one (x), self._coerce_one (y), self._coerce_one (out)
 
+    def is_scalar (self, x):
+        return False
+
+    def atleast_1d (self, x):
+        return x
+
     def make_output_array (self, opname, x, y=None):
         if y is None:
             shape = x._data.shape
@@ -945,6 +951,9 @@ class MeasurementColumn (PKTableColumnABC, MathlibDelegatingObject):
 
     def repvals (self, **kwargs):
         return self._data.repvals (**kwargs)
+
+    def cmask (self, **kwargs):
+        return self._data.cmask (**kwargs)
 
 
     # Indexing.

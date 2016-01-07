@@ -266,6 +266,9 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, MathlibDelegatingObject))
 
     # mathlib convenience
 
+    def cmask (self, **kwargs):
+        return self._pk_mathlib_library_.cmask (self, **kwargs)
+
     def repvals (self, **kwargs):
         return self._pk_mathlib_library_.repvals (self, **kwargs)
 
@@ -632,6 +635,14 @@ class SampledFunctionLibrary (MeasurementFunctionLibrary):
         return Sampled.from_exact_array (domain, Kind.msmt, a)
 
 
+    def atleast_1d (self, x):
+        data = np.atleast_1d (x.data)
+        rv = Sampled (x.domain, data.shape, _noalloc=True)
+        rv.data = data
+        rv._scalar = False
+        return rv
+
+
     def make_output_array (self, opname, x, y=None):
         if y is None:
             shape = x.shape
@@ -640,7 +651,9 @@ class SampledFunctionLibrary (MeasurementFunctionLibrary):
             shape = np.broadcast (x, y).shape
             sdtype = np.result_type (x.dtype, y.dtype)
 
-        if opname == 'repvals':
+        if opname == 'cmask':
+            return np.empty (shape, dtype=np.bool)
+        elif opname == 'repvals':
             return np.empty (shape, dtype=sdtype)
 
         return Sampled (Domain.anything, shape, dtype=sdtype, _noinit=True)
@@ -1000,6 +1013,14 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
         return Approximate.from_other (a, domain=domain)
 
 
+    def atleast_1d (self, x):
+        data = np.atleast_1d (x.data)
+        rv = Approximate (x.domain, data.shape, _noalloc=True)
+        rv.data = data
+        rv._scalar = False
+        return rv
+
+
     def make_output_array (self, opname, x, y=None):
         if y is None:
             shape = x.shape
@@ -1008,7 +1029,9 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
             shape = np.broadcast (x, y).shape
             sdtype = np.result_type (x.dtype, y.dtype)
 
-        if opname == 'repvals':
+        if opname == 'cmask':
+            return np.empty (shape, dtype=np.bool)
+        elif opname == 'repvals':
             return np.empty (shape, dtype=sdtype)
 
         return Approximate (Domain.anything, shape, dtype=sdtype, _noinit=True)
@@ -1040,6 +1063,18 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
         out.data['kind'] = Kind.add[Kind.binop (x.data['kind'], y.data['kind'])]
         np.add (x.data['x'], y.data['x'], out.data['x'])
         np.sqrt (x.data['u']**2 + y.data['u']**2, out.data['u'])
+        return out
+
+
+    def tidy_cmask (self, x, out, welldefined=False, finite=False):
+        out.fill (True)
+
+        if welldefined:
+            np.logical_and (out, x.data['kind'] == Kind.msmt, out)
+
+        if finite:
+            np.logical_and (out, np.isfinite (x.data['x']), out)
+
         return out
 
 
@@ -1112,19 +1147,12 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
         return out
 
 
-    def repvals (self, x, out=None, method=None, limitsok=False):
+    def tidy_repvals (self, x, out, method=None, limitsok=False):
         if not limitsok and np.any ((x.data['kind'] == Kind.lower) | (x.data['kind'] == Kind.upper)):
             raise ValueError ('cannot call repvals() on measurement array containing '
                               'limits without limitsok=True')
 
-        if out is not None:
-            out[:] = x.data['x']
-            return out
-
-        out = x.data['x'].copy ()
-
-        if x._scalar:
-            out = out[0]
+        out[:] = x.data['x']
         return out
 
 
