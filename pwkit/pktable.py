@@ -70,10 +70,14 @@ class PKTable (object):
     rows = None
     "A helper object for manipulating the table rows."
 
+    disp = None
+    "A helper object for controlling how the table is displayed."
+
     def __init__ (self):
         self._data = OrderedDict ()
         self.cols = _PKTableColumnsHelper (self)
         self.rows = _PKTableRowsHelper (self)
+        self.disp = _PKTableDisplayHelper (self)
 
 
     @property
@@ -172,19 +176,21 @@ class PKTable (object):
         if len (self) == 0:
             return '(empty PKTable)'
 
-        if len (self._data) > 9:
-            colnames = self._data.keys ()[:4] + ['...'] + self._data.keys ()[-4:]
-            colobjs = self._data.values ()[:4] + [None] + self._data.values ()[-4:]
-        else:
+        if len (self._data) <= self.disp.ncols:
             colnames = list (self._data.keys ())
             colobjs = list (self._data.values ())
+        else:
+            k = (self.disp.ncols - 1) // 2
+            colnames = self._data.keys ()[:k] + ['...'] + self._data.keys ()[-k:]
+            colobjs = self._data.values ()[:k] + [None] + self._data.values ()[-k:]
 
         nrow = self.shape[1]
 
-        if nrow > 11:
-            rowids = [0, 1, 2, 3, 4, None, nrow - 5, nrow - 4, nrow - 3, nrow - 2, nrow - 1]
-        else:
+        if nrow <= self.disp.nrows:
             rowids = list (range (nrow))
+        else:
+            k = (self.disp.nrows - 1) // 2
+            rowids = list (range (k)) + [None] + [nrow - i for i in xrange (k, 0, -1)]
 
         maxwidths = np.array ([len (n) for n in colnames], dtype=np.int)
         buffer = [None] * len (rowids)
@@ -518,6 +524,16 @@ class _PKTableRowProxy (object):
     def to_holder (self):
         from . import Holder
         return Holder (**self.to_dict ())
+
+
+class _PKTableDisplayHelper (object):
+    """The object that implements the `PKTable.disp` functionality."""
+
+    def __init__ (self, owner):
+        self._owner = owner
+
+    nrows = 11
+    ncols = 7
 
 
 # Actual column types
