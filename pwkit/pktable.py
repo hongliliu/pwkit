@@ -889,15 +889,18 @@ class PKColumnFunctionLibrary (TidiedFunctionLibrary):
         if opname == 'repvals':
             return np.empty (shape, dtype=dtype)
 
+        if opname in ('equal greater greater_equal isfinite isinf isnan less less_equal logical_and logical_not logical_or logical_xor not_equal'.split ()):
+            dtype = np.bool
+
         return self.coltype.new_like (x, dtype=dtype, length=shape[0])
 
     def generic_tidy_unary (self, opname, x, out):
         dlib = get_library_for (x._data)
-        if opname == 'tidy_repvals':
+        # ``[5:]`` strips the tidy_ prefix
+        if opname[5:] == 'repvals':
             outdata = out
         else:
             outdata = out._data
-        # ``[5:]`` strips the tidy_ prefix
         getattr (dlib, opname[5:]) (x._data, outdata)
         return out
 
