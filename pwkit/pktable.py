@@ -443,8 +443,8 @@ class _PKTableRowsHelper (object):
         if isinstance (key, types.SliceType):
             return key, False
 
-        if isinstance (thing, six.integer_types):
-            return np.array ([thing]), True
+        if isinstance (key, six.integer_types):
+            return np.array ([key]), True
 
         raise KeyError ('unhandled PKTable row indexer %r' % (key,))
 
