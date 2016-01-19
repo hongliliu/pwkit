@@ -176,14 +176,7 @@ class PKTable (object):
         if len (self) == 0:
             return '(empty PKTable)'
 
-        if len (self._data) <= self.disp.ncols:
-            colnames = list (self._data.keys ())
-            colobjs = list (self._data.values ())
-        else:
-            k = (self.disp.ncols - 1) // 2
-            colnames = self._data.keys ()[:k] + ['...'] + self._data.keys ()[-k:]
-            colobjs = self._data.values ()[:k] + [None] + self._data.values ()[-k:]
-
+        colnames, colobjs = self.disp._get_cols_to_show ()
         nrow = self.shape[1]
 
         if nrow <= self.disp.nrows:
@@ -534,6 +527,31 @@ class _PKTableDisplayHelper (object):
 
     nrows = 11
     ncols = 7
+
+    _shown_cols = None
+
+    def _get_cols_to_show (self):
+        """Returns ``(colnames, colobjs)``, each a list. The first holds column names
+        to be displayed, the second the PKTableColumnABC objects to display.
+        In the latter, None implies a blank spacer column.
+
+        """
+        names = self._shown_cols
+        data = self._owner._data
+
+        if names is None:
+            names = list (data.keys ())
+
+        if len (names) <= self.ncols:
+            return names, [data[n] for n in names]
+
+        k = (self.ncols - 1) // 2
+        return (
+            names[:k] + ['...'] + names[-k:],
+            [data[n] for n in names[:k]] + [None] + [data[n] for n in names[-k:]]
+        )
+
+
 
 
 # Actual column types
