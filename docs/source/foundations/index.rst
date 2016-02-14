@@ -15,3 +15,4 @@ This documentation has a lot of stubs.
    numerical.rst
    parallel.rst
    pwkit-simpleenum.rst
+   math-libraries.rst

@@ -1,11 +1,24 @@
 # -*- mode: python; coding: utf-8 -*-
-# Copyright 2015 Peter Williams <peter@newton.cx> and collaborators.
+# Copyright 2015-2016 Peter Williams <peter@newton.cx> and collaborators.
 # Licensed under the MIT license.
 
-"""Vectorized math functions that work on objects of any type
+"""The :mod:`numpy` package provides a powerful framework for manipulating and
+querying N-dimensional arrays of numerical data. It provides a suite of
+functions, such as :func:`numpy.shape` and :func:`numpy.multiply`, that
+provide a consistent interface for performing these operations, even if these
+inputs are (say) standard Python lists and not :class:`numpy.ndarray`
+instances.
 
-The basic issue is that Numpy's ufuncs can't be overridden for arbitrary
-classes. We implement this feature.
+Unfortunately, the Numpy functions do not do a good job of handling
+“array-like” Python objects that may look and behave much like N-dimensional
+Numpy arrays, but do not share a common implementation. The :mod:`pwkit`
+package provides two objects along these lines: :mod:`pwkit.msmt` measurement
+arrays, and :mod:`pwkit.pktable` table columns.
+
+The :mod:`pwkit.mathlib` package makes it so that you can use the same suite
+of Numpy-like functions — the “Common Interface” — to operate on any of these
+objects. The same infrastructure makes it so that you can use the standard
+mathematical operators on combinations of these objects as well.
 
 """
 from __future__ import absolute_import, division, print_function, unicode_literals
@@ -191,14 +204,37 @@ class MathFunctionLibraryMeta (type):
 
 
 class MathFunctionLibrary (six.with_metaclass (MathFunctionLibraryMeta, object)):
+    """Instaces of this class implement the :mod:`pwkit.mathlib` API for some
+    class of objects. For each free function of the “common interface”
+    implemented in :mod:`pwkit.mathlib`, this class has corresponding method
+    that is called. This class has a few extra methods that are not part of
+    the common interface, but are needed to make the whole system work.
+
+    """
     def accepts (self, opname, other):
+        """Return a boolean indicating whether this math library is able to perform
+        the operation named by *opname* on the object *other*. The *opname*
+        may be None, in which case a best-possible answer should be given
+        assuming that the particular operation to be performed is not known.
+
+        """
         return False
 
     def generic_unary (self, opname, x, out=None, **kwargs):
+        """This function is called when a Numpy unary universal function is called on
+        *x*, and this library does not have a specific implementation of the function.
+        The default behavior is to raise a :exc:`NotImplementedError`.
+
+        """
         raise NotImplementedError ('math function "%s" not implemented for objects of type "%s" in %s'
                                    % (opname, x.__class__.__name__, self))
 
     def generic_binary (self, opname, x, y, out=None, **kwargs):
+        """This function is called when a Numpy unary biniversal function is called on
+        *x* and *y*, and this library does not have a specific implementation of the
+        function. The default behavior is to raise a :exc:`NotImplementedError`.
+
+        """
         raise NotImplementedError ('math function "%s" not implemented for objects of types "%s" '
                                    'and "%s" in %s' % (opname, x.__class__.__name__,
                                                        y.__class__.__name__, self))
@@ -261,6 +297,21 @@ numpy_library = NumpyFunctionLibrary ()
 
 
 def get_library_for (x, y=None):
+    """Given one or two array-like objects, return a `MathFunctionLibrary`
+    instance that implements the Common Interface math functions for the objects.
+
+    If the inputs are scalars, instances of `numpy.generic`,
+    `numpy.chararray`, `numpy.ndarray`, `numpy.recarray`,
+    `numpy.ma.MaskedArray`, `list`, or `tuple`, an instance
+    of`NumpyFunctionLibrary` is used, which essentially directly delegates to
+    the corresponding functions in the `numpy` module.
+
+    Otherwise, each object is checked for a ``_pk_mathlib_library_``
+    attribute, which should be an instance of `MathFunctionLibrary`. The
+    `~MathFunctionLibrary.accepts` method is used to check that the chosen
+    library is compatible with the inputs.
+
+    """
     # Efficiency (?): if it's a standard numpy or builtin type, delegate to
     # that ASAP.
 

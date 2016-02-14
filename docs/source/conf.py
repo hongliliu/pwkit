@@ -30,6 +30,8 @@ exclude_patterns = []
 # unit titles (such as .. function::).
 #add_module_names = True
 
+default_role = 'py:obj'
+
 pygments_style = 'sphinx'
 todo_include_todos = False
 
