@@ -13,197 +13,253 @@ Unfortunately, the Numpy functions do not do a good job of handling
 “array-like” Python objects that may look and behave much like N-dimensional
 Numpy arrays, but do not share a common implementation. The :mod:`pwkit`
 package provides two objects along these lines: :mod:`pwkit.msmt` measurement
-arrays, and :mod:`pwkit.pktable` table columns.
+arrays, and :mod:`pwkit.pktable` table columns. The reason for this module's
+existence are the measurement array classes, which need to override the
+lowest-level math operations.
 
 The :mod:`pwkit.mathlib` package makes it so that you can use the same suite
 of Numpy-like functions — the “Common Interface” — to operate on any of these
-objects. The same infrastructure makes it so that you can use the standard
-mathematical operators on combinations of these objects as well.
+objects, or reasonable combinations of them. The same infrastructure makes it
+so that you can use the standard Python mathematical operators on combinations
+of these objects as well.
 
 """
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 # __all__ is augmented below:
 __all__ = str ('''
-numpy_unary_ufuncs
-numpy_binary_ufuncs
-MathFunctionLibraryMeta
+broadcast_shapes
+try_asarray
+Signatures
+Flags
+FunctionSpecification
+common_interface_functions
 MathFunctionLibrary
-
 NumpyFunctionLibrary
 numpy_library
 numpy_types
-
 get_library_for
-MathlibDelegatingObject
-
-TidiedFunctionLibraryMeta
 TidiedFunctionLibrary
+MathlibDelegatingObject
 ''').split ()
 
-import abc, operator, six
+import six
 from functools import partial
 from six.moves import range
 import numpy as np
 from .oo_helpers import partialmethod
+from .simpleenum import enumeration
 
 
-# as of 1.10:
-numpy_unary_ufuncs = str ('''
-abs
-absolute
-arccos
-arccosh
-arcsin
-arcsinh
-arctan
-arctanh
-bitwise_not
-cbrt
-ceil
-conj
-conjugate
-cos
-cosh
-deg2rad
-degrees
-exp
-exp2
-expm1
-fabs
-floor
-invert
-isfinite
-isinf
-isnan
-log
-log10
-log1p
-log2
-logical_not
-negative
-rad2deg
-radians
-reciprocal
-rint
-sign
-signbit
-sin
-sinh
-spacing
-sqrt
-square
-tan
-tanh
-trunc
-''').split ()
+# A few generic helpers
 
-numpy_binary_ufuncs = str ('''
-add
-arctan2
-bitwise_and
-bitwise_or
-bitwise_xor
-copysign
-divide
-equal
-floor_divide
-fmax
-fmin
-fmod
-frexp
-greater
-greater_equal
-hypot
-ldexp
-left_shift
-less
-less_equal
-logaddexp
-logaddexp2
-logical_and
-logical_or
-logical_xor
-maximum
-minimum
-mod
-modf
-multiply
-nextafter
-not_equal
-power
-remainder
-right_shift
-subtract
-true_divide
-''').split ()
+def broadcast_shapes (*shapes):
+    """Given a set of array shapes, compute the shape of their mutual broadcast
+    using Numpy rules. Numpy can do this with actual arrays but can't do it
+    with shape information only.
+
+    We assume that the input shapes are all valid: tuples with nonnegative
+    integer values.
+
+    """
+    maxlen = np.max ([len (s) for s in shapes])
+    padded = np.array ([(1,) * (maxlen - len (s)) + s for s in shapes])
+    result = padded[0]
+
+    for i in range (maxlen):
+        for j in range (1, len (shapes)):
+            x = padded[j,i]
+
+            if x != 1:
+                if result[i] == 1:
+                    result[i] = x
+                elif result[i] != x:
+                    raise ValueError ('shape mismatch: objects cannot be broadcast to a single shape')
+
+    return tuple (result)
 
 
-all_unary_funcs = numpy_unary_ufuncs + str('''
-cmask
-repvals
-''').split ()
+def try_asarray (thing, fail_mode='raise'):
+    # NOTE: this function is duplicates the one in numutil. I might want to
+    # make numutil depend on mathlib some day.
+    thing = np.asarray (thing)
+    if thing.dtype.kind in 'bifc':
+        return thing
 
-all_binary_funcs = numpy_binary_ufuncs
+    if fail_mode == 'raise':
+        raise ValueError ('cannot treat %r as a data array' % (thing,))
+    elif fail_mode == 'none':
+        return None
+    raise Exception ('unrecognized try_asarray() fail_mode of %r' % (fail_mode,))
 
 
+# The real meat starts with the Common Interface. This defines the set of
+# operations on "array-like" objects that we support -- although
+# implementations for particular objects are free to not implement some, or
+# many, of the these operations. We aim to precisely match the semantics of
+# Numpy whenever possible.
 
-def metaclass_lookup_attribute (attrname, classdict, parents):
-    """Um, surely there's a better way to do all of this? We're trying to see if a
-    given name is defined anywhere in the under-construction class or its
-    superclasses.
+@enumeration
+class Signatures (object):
+    std_unary = 0
+    """A standard unary function compatible with most of Numpy's unary universal
+    functions ("ufuncs"). These have signature (x, out=None, **kwargs) and
+    return one output array (that may just be *out* if it was provided).
 
-    The parent search could be better but I think should only be inefficient,
-    not wrong, unless you're really going out of your way to mess with this
-    code. We need to use __getattribute__ because we need to interrogate the
-    partialmethod objects, which are descriptors.
+    """
+    std_binary = 1
+    """A standard binary function compatible with most of Numpy's binary universal
+    functions ("ufuncs"). These have signature (x, y, out=None, **kwargs) and
+    return one output array (that may just be *out* if it was provided) that
+    has a shape resulting from broadcasting *x* and *y*.
+
+    """
+    other_1 = 2
+    """Some other non-standard signature for which only the first argument is an
+    array-like object.
 
     """
 
-    attr = classdict.get (attrname)
-    if attr is not None:
-        return attr
 
-    for parent in parents:
-        for pp in parent.mro ():
-            try:
-                attr = object.__getattribute__ (pp, attrname)
-                return attr
-            except AttributeError:
-                pass
+@enumeration
+class Flags (object):
+    none = 0
 
-    raise TypeError ('metaclass user must implement "%s" attribute' % attrname)
+    has_numpy_impl = 1 << 0
+    """If set, there is a function in the main :mod:`numpy` module that implements
+    this function with precisely the semantics that we aim to provide;
+    although, of course, the numpy implementation is only guaranteed to work
+    on Numpy-native types.
 
+    """
 
-def metaclass_maybe_add_generic_impl (opname, classdict, parents, generic):
-    try:
-        impl = metaclass_lookup_attribute (opname, classdict, parents)
-    except TypeError:
-        impl = None
+    bool_result = 1 << 1
+    """For std_unary or std_binary functions, indicates that the type of the
+    result is always `numpy.bool`, regardless of the input types. Example:
+    ``greater_equal``.
 
-    if impl is not None and not getattr (impl, '_generic_impl', False):
-        return # there is an implementation and it's not generic
+    """
 
-    impl = classdict[opname] = partialmethod (generic, opname)
-    impl._generic_impl = True
+    ints_only = 1 << 2
+    """Indicates that the operation is only valid on integer inputs.
 
+    This flag isn't currently used, but it seems good to annotate it while I'm
+    paying attention to the ufunc semantics.
 
-class MathFunctionLibraryMeta (type):
-    def __new__ (cls, name, parents, dct):
-        generic = metaclass_lookup_attribute ('generic_unary', dct, parents)
-
-        for opname in all_unary_funcs:
-            metaclass_maybe_add_generic_impl (opname, dct, parents, generic)
-
-        generic = metaclass_lookup_attribute ('generic_binary', dct, parents)
-
-        for opname in all_binary_funcs:
-            metaclass_maybe_add_generic_impl (opname, dct, parents, generic)
-
-        return super (MathFunctionLibraryMeta, cls).__new__ (cls, name, parents, dct)
+    """
 
 
-class MathFunctionLibrary (six.with_metaclass (MathFunctionLibraryMeta, object)):
+class FunctionSpecification (object):
+    name = None
+    signature = None
+    flags = Flags.none
+
+    def __init__ (self, name, signature, flags):
+        self.name = name
+        self.signature = signature
+        self.flags = flags
+
+
+FS = FunctionSpecification # temporary for init
+s = Signatures
+f = Flags
+
+common_interface_functions = dict ((s.name, s) for s in [
+    FS ('absolute',      s.std_unary,   f.has_numpy_impl),
+    FS ('add',           s.std_binary,  f.has_numpy_impl),
+    FS ('arccos',        s.std_unary,   f.has_numpy_impl),
+    FS ('arccosh',       s.std_unary,   f.has_numpy_impl),
+    FS ('arcsin',        s.std_unary,   f.has_numpy_impl),
+    FS ('arcsinh',       s.std_unary,   f.has_numpy_impl),
+    FS ('arctan',        s.std_unary,   f.has_numpy_impl),
+    FS ('arctan2',       s.std_unary,   f.has_numpy_impl),
+    FS ('arctanh',       s.std_unary,   f.has_numpy_impl),
+    FS ('bitwise_and',   s.std_binary,  f.has_numpy_impl | f.ints_only),
+    FS ('bitwise_or',    s.std_binary,  f.has_numpy_impl | f.ints_only),
+    FS ('bitwise_xor',   s.std_binary,  f.has_numpy_impl | f.ints_only),
+    FS ('broadcast_to',  s.other_1,     f.has_numpy_impl),
+    FS ('cbrt',          s.std_unary,   f.has_numpy_impl),
+    FS ('ceil',          s.std_unary,   f.has_numpy_impl),
+    FS ('cmask',         s.other_1,     f.bool_result),
+    FS ('conjugate',     s.std_unary,   f.has_numpy_impl),
+    FS ('copysign',      s.std_binary,  f.has_numpy_impl),
+    FS ('cos',           s.std_unary,   f.has_numpy_impl),
+    FS ('cosh',          s.std_unary,   f.has_numpy_impl),
+    FS ('deg2rad',       s.std_unary,   f.has_numpy_impl),
+    FS ('divide',        s.std_binary,  f.has_numpy_impl),
+    FS ('get_dtype',     s.other_1,     f.none),
+    FS ('get_size',      s.other_1,     f.none),
+    FS ('equal',         s.std_binary,  f.has_numpy_impl | f.bool_result),
+    FS ('exp',           s.std_unary,   f.has_numpy_impl),
+    FS ('exp2',          s.std_unary,   f.has_numpy_impl),
+    FS ('expm1',         s.std_unary,   f.has_numpy_impl),
+    FS ('fabs',          s.std_unary,   f.has_numpy_impl),
+    FS ('floor',         s.std_unary,   f.has_numpy_impl),
+    FS ('floor_divide',  s.std_binary,  f.has_numpy_impl),
+    FS ('fmax',          s.std_binary,  f.has_numpy_impl),
+    FS ('fmin',          s.std_binary,  f.has_numpy_impl),
+    FS ('fmod',          s.std_binary,  f.has_numpy_impl),
+    FS ('frexp',         s.other_1,     f.has_numpy_impl),
+    FS ('greater',       s.std_binary,  f.has_numpy_impl | f.bool_result),
+    FS ('greater_equal', s.std_binary,  f.has_numpy_impl | f.bool_result),
+    FS ('hypot',         s.std_binary,  f.has_numpy_impl),
+    FS ('invert',        s.std_unary,   f.has_numpy_impl),
+    FS ('isfinite',      s.std_unary,   f.has_numpy_impl | f.bool_result),
+    FS ('isinf',         s.std_unary,   f.has_numpy_impl | f.bool_result),
+    FS ('isnan',         s.std_unary,   f.has_numpy_impl | f.bool_result),
+    FS ('ldexp',         s.std_binary,  f.has_numpy_impl),
+    FS ('left_shift',    s.std_binary,  f.has_numpy_impl | f.ints_only),
+    FS ('less',          s.std_binary,  f.has_numpy_impl | f.bool_result),
+    FS ('less_equal',    s.std_binary,  f.has_numpy_impl | f.bool_result),
+    FS ('log',           s.std_unary,   f.has_numpy_impl),
+    FS ('log10',         s.std_unary,   f.has_numpy_impl),
+    FS ('log1p',         s.std_unary,   f.has_numpy_impl),
+    FS ('log2',          s.std_unary,   f.has_numpy_impl),
+    FS ('logaddexp',     s.std_binary,  f.has_numpy_impl),
+    FS ('logaddexp2',    s.std_binary,  f.has_numpy_impl),
+    FS ('logical_and',   s.std_binary,  f.has_numpy_impl | f.bool_result),
+    FS ('logical_or',    s.std_binary,  f.has_numpy_impl | f.bool_result),
+    FS ('logical_not',   s.std_unary,   f.has_numpy_impl | f.bool_result),
+    FS ('logical_xor',   s.std_binary,  f.has_numpy_impl | f.bool_result),
+    FS ('maximum',       s.std_binary,  f.has_numpy_impl),
+    FS ('minimum',       s.std_binary,  f.has_numpy_impl),
+    FS ('modf',          s.other_1,     f.has_numpy_impl),
+    FS ('multiply',      s.std_binary,  f.has_numpy_impl),
+    FS ('negative',      s.std_unary,   f.has_numpy_impl),
+    FS ('nextafter',     s.std_binary,  f.has_numpy_impl),
+    FS ('not_equal',     s.std_binary,  f.has_numpy_impl | f.bool_result),
+    FS ('power',         s.std_binary,  f.has_numpy_impl),
+    FS ('rad2deg',       s.std_unary,   f.has_numpy_impl),
+    FS ('reciprocal',    s.std_unary,   f.has_numpy_impl),
+    FS ('remainder',     s.std_binary,  f.has_numpy_impl),
+    FS ('repvals',       s.std_unary,   f.none),
+    FS ('reshape',       s.other_1,     f.has_numpy_impl),
+    FS ('right_shift',   s.std_binary,  f.has_numpy_impl | f.ints_only),
+    FS ('rint',          s.std_unary,   f.has_numpy_impl),
+    FS ('shape',         s.other_1,     f.has_numpy_impl),
+    FS ('sign',          s.std_unary,   f.has_numpy_impl),
+    FS ('signbit',       s.std_unary,   f.has_numpy_impl | f.bool_result),
+    FS ('sin',           s.std_unary,   f.has_numpy_impl),
+    FS ('sinh',          s.std_unary,   f.has_numpy_impl),
+    FS ('spacing',       s.std_unary,   f.has_numpy_impl),
+    FS ('sqrt',          s.std_unary,   f.has_numpy_impl),
+    FS ('square',        s.std_unary,   f.has_numpy_impl),
+    FS ('subtract',      s.std_binary,  f.has_numpy_impl),
+    FS ('tan',           s.std_unary,   f.has_numpy_impl),
+    FS ('tanh',          s.std_unary,   f.has_numpy_impl),
+    FS ('true_divide',   s.std_binary,  f.has_numpy_impl),
+    FS ('trunc',         s.std_unary,   f.has_numpy_impl),
+])
+
+del FS, s, f
+
+
+
+
+# Now we define the base MathFunctionLibrary that implements all of these
+# functions for some input type ... as well as a few helper function.
+
+class MathFunctionLibrary (object):
     """Instaces of this class implement the :mod:`pwkit.mathlib` API for some
     class of objects. For each free function of the “common interface”
     implemented in :mod:`pwkit.mathlib`, this class has corresponding method
@@ -211,52 +267,113 @@ class MathFunctionLibrary (six.with_metaclass (MathFunctionLibraryMeta, object))
     the common interface, but are needed to make the whole system work.
 
     """
-    def accepts (self, opname, other):
-        """Return a boolean indicating whether this math library is able to perform
-        the operation named by *opname* on the object *other*. The *opname*
-        may be None, in which case a best-possible answer should be given
-        assuming that the particular operation to be performed is not known.
+    def __str__ (self):
+        return self.__class__.__name__
+
+    # These methods are helpers for the machinery below. Some of them are only
+    # used in certain subclasses (e.g. TidiedFunctionLibrary), but they're
+    # generic enough that it seems good to define them at the top of the
+    # hierarchy. The common pattern here is these are functions where the
+    # natural first argument is *not* an array-like object.
+
+    def accepts (self, other):
+        """Return a boolean indicating whether this math library is able to operate on
+        objects having the type of *other*.
 
         """
         return False
 
-    def generic_unary (self, opname, x, out=None, **kwargs):
-        """This function is called when a Numpy unary universal function is called on
-        *x*, and this library does not have a specific implementation of the function.
-        The default behavior is to raise a :exc:`NotImplementedError`.
+    def new_empty (self, shape, dtype):
+        """Return a newly-allocated array object having the specified shape and
+        element dtype.
+
+        """
+        raise NotImplementedError ()
+
+    def typeconvert (self, thing):
+        """Convert *thing* to some standard array-like type.
+
+        This will be called on all arguments to and outputs of the standard
+        unary and binary functions so that the tidied versions of functions to
+        not need to painstakingly special-case whether each argument is a
+        Python scalar, a Numpy array, etc. Because this function is used for
+        output arguments, if at all possible it should be the case that
+        modifications to the the returned object propagate back to *thing*.
+
+        """
+        return thing
+
+    # These methods implement Common Interface functions in a really generic way
+    # that ought to be useful in the vast majority of cases.
+
+    def get_dtype (self, x):
+        return x.dtype
+
+    def get_size (self, x):
+        return np.prod (self.shape (x), dtype=np.int)
+
+    def shape (self, x):
+        return x.shape
+
+    # The default implementations for the Common Interface functions are added
+    # to this class in _fill_base_library_type() below.
+
+    def _not_implemented (self, opname, x, *args, **kwargs):
+        """This function is called when an unimplemented Common Interface function is
+        called.
 
         """
         raise NotImplementedError ('math function "%s" not implemented for objects of type "%s" in %s'
                                    % (opname, x.__class__.__name__, self))
 
-    def generic_binary (self, opname, x, y, out=None, **kwargs):
-        """This function is called when a Numpy unary biniversal function is called on
-        *x* and *y*, and this library does not have a specific implementation of the
-        function. The default behavior is to raise a :exc:`NotImplementedError`.
 
-        """
-        raise NotImplementedError ('math function "%s" not implemented for objects of types "%s" '
-                                   'and "%s" in %s' % (opname, x.__class__.__name__,
-                                                       y.__class__.__name__, self))
+def _fill_base_library_type ():
+    ni = MathFunctionLibrary._not_implemented
+
+    for fs in six.viewvalues (common_interface_functions):
+        impl = getattr (MathFunctionLibrary, fs.name, None)
+        if impl is None:
+            setattr (MathFunctionLibrary, fs.name, partialmethod (ni, fs.name))
+
+_fill_base_library_type ()
 
 
 
+
+# Now we implement the NumpyFunctionLibrary class that delegates almost
+# everything to Numpy itself.
 
 numpy_types = np.ScalarType + (np.generic, np.chararray, np.ndarray, np.recarray,
                                np.ma.MaskedArray, list, tuple)
 
 class NumpyFunctionLibrary (MathFunctionLibrary):
-    def accepts (self, opname, other):
+    """This subclass is used to execute all math operations on array-like objects
+    that stock Numpy can handle. Its implementations of “ufunc” functions like
+    ``add`` and ``square`` delegate directly to their Numpy equivalents.
+    However, it still needs to implement the methods of the Common Interface
+    that aren't in Numpy.
+
+    """
+    # Mathlib machinery helpers:
+
+    def accepts (self, other):
         return isinstance (other, numpy_types)
 
-    def cmask (self, x, out=None, welldefined=False, finite=False):
-        scalar = np.isscalar (x)
-        x = np.atleast_1d (np.asarray (x))
+    def new_empty (self, shape, dtype):
+        return np.empty (shape, dtype=dtype)
 
-        if out is None:
-            out = np.empty (x.shape, dtype=np.bool)
+    def typeconvert (self, thing):
+        return try_asarray (thing)
 
-        out.fill (True)
+    # Implementations of the few Common Interface functions that are *not*
+    # provided by Numpy itself:
+
+    def cmask (self, x, welldefined=False, finite=False):
+        x = np.asarray (x)
+        zerod = (x.shape == ())
+        x = np.atleast_1d (x)
+
+        out = np.ones (x.shape, dtype=np.bool)
 
         if welldefined:
             np.logical_and (out, ~np.isnan (x), out)
@@ -264,31 +381,36 @@ class NumpyFunctionLibrary (MathFunctionLibrary):
         if finite:
             np.logical_and (out, np.isfinite (x), out)
 
-        if scalar:
-            return np.asscalar (out)
+        if zerod:
+            return out.reshape (())
         return out
 
-    def repvals (self, x, out=None):
-        if out is None:
-            out = np.array (x, copy=True)
-        else:
-            out[:] = x
-        return out
+
+    def get_dtype (self, x):
+        return np.asarray (x).dtype
+
+
+    def get_size (self, x):
+        return np.asarray (x).size
+
+
+    def repvals (self, x):
+        return np.array (x, copy=True)
+
+    # The implementations for the bulk of the Common Interface functions,
+    # which just delegate to Numpy, are added in below.
 
 
 def _fill_numpy_library_type ():
-    items = {}
+    """We allow the Numpy implementations to not be available to keep compatiblity
+    with older versions of Numpy, since the list of provided ufuncs has grown
+    with time.
 
-    for name in numpy_unary_ufuncs:
-        # Look up implementations robustly to keep compat with older Numpys.
-        impl = getattr (np, name, None)
+    """
+    for fs in six.viewvalues (common_interface_functions):
+        impl = getattr (np, fs.name, None)
         if impl is not None:
-            setattr (NumpyFunctionLibrary, name, impl)
-
-    for name in numpy_binary_ufuncs:
-        impl = getattr (np, name, None)
-        if impl is not None:
-            setattr (NumpyFunctionLibrary, name, impl)
+            setattr (NumpyFunctionLibrary, fs.name, impl)
 
 _fill_numpy_library_type ()
 numpy_library = NumpyFunctionLibrary ()
@@ -296,9 +418,13 @@ numpy_library = NumpyFunctionLibrary ()
 
 
 
-def get_library_for (x, y=None):
-    """Given one or two array-like objects, return a `MathFunctionLibrary`
-    instance that implements the Common Interface math functions for the objects.
+# Now we can implement get_library_for() and the actual implementations of the
+# freestanding Common Interface functions, which just look up the appropriate
+# MathFunctionLibrary instance and delegate to it.
+
+def get_library_for (*objects):
+    """Given array-like objects, return a `MathFunctionLibrary` instance that can
+    perform Common Interface math functions on all of them.
 
     If the inputs are scalars, instances of `numpy.generic`,
     `numpy.chararray`, `numpy.ndarray`, `numpy.recarray`,
@@ -312,58 +438,238 @@ def get_library_for (x, y=None):
     library is compatible with the inputs.
 
     """
-    # Efficiency (?): if it's a standard numpy or builtin type, delegate to
-    # that ASAP.
+    # Efficiency (?): check pure-numpy case ASAP.
 
-    if isinstance (x, numpy_types) and (y is None or isinstance (y, numpy_types)):
+    if all (isinstance (o, numpy_types) for o in objects):
         return numpy_library
 
-    # If either object has a _pk_mathlib_library_ function, it can tell us how
-    # to combine the operands.
+    for obj in objects:
+        library = getattr (obj, '_pk_mathlib_library_', None)
+        if library is None:
+            continue
 
-    library = getattr (x, '_pk_mathlib_library_', None)
+        for obj2 in objects:
+            # Note that we still do this check when ``obj2 is obj``; but who cares?
+            if not library.accepts (obj2):
+                break
+        else:
+            # This path is called when we don't break out of the loop => this
+            # library can handle all objects.
+            return library
 
-    if library is not None and (y is None or library.accepts (None, y)):
-        return library
+    # If we got here, no library dealt with everything. Boo.
 
-    if y is None:
-        raise ValueError ('cannot identify math function library for object '
-                          '%r of type %s' % (x, x.__class__.__name__))
-
-    library = getattr (y, '_pk_mathlib_library_', None)
-    if library is not None and library.accepts (None, x):
-        return library
-
-    raise ValueError ('cannot identify math function library for objects '
-                      '%r of type %s and %r of type %s' % (x, x.__class__.__name__,
-                                                           y, y.__class__.__name__))
-
-
-def _dispatch_unary_function (name, x, out=None, **kwargs):
-    return getattr (get_library_for (x), name) (x, out, **kwargs)
+    raise ValueError ('cannot identify math function library for input(s): ' +
+                      ', '.join ('%s (%s)' % (o, o.__class__.__name__) for o in objects))
 
 
-def _dispatch_binary_function (name, x, y, out=None, **kwargs):
-    return getattr (get_library_for (x, y), name) (x, y, out, **kwargs)
+def _dispatch_std_unary (name, x, out=None, **kwargs):
+    if out is None:
+        library = get_library_for (x)
+    else:
+        library = get_library_for (x, out)
 
+    return getattr (library, name) (x, out, **kwargs)
+
+
+def _dispatch_std_binary (name, x, y, out=None, **kwargs):
+    if out is None:
+        library = get_library_for (x, y)
+    else:
+        library = get_library_for (x, y, out)
+
+    return getattr (library, name) (x, y, out, **kwargs)
+
+
+def _dispatch_other_1 (name, x, *args, **kwargs):
+    library = get_library_for (x)
+    return getattr (library, name) (x, *args, **kwargs)
+
+
+_dispatchers = {
+    Signatures.std_unary: _dispatch_std_unary,
+    Signatures.std_binary: _dispatch_std_binary,
+    Signatures.other_1: _dispatch_other_1,
+}
 
 def _create_wrappers (namespace):
     """This function populates the global namespace with functions dispatching the
     unary and binary math functions.
 
     """
-    for name in all_unary_funcs:
-        namespace[name] = partial (_dispatch_unary_function, name)
-
-    for name in all_binary_funcs:
-        namespace[name] = partial (_dispatch_binary_function, name)
+    for fs in six.viewvalues (common_interface_functions):
+        namespace[fs.name] = partial (_dispatchers[fs.signature], fs.name)
 
 _create_wrappers (globals ())
-__all__ += all_unary_funcs
-__all__ += all_binary_funcs
+__all__ += list (six.viewkeys (common_interface_functions))
+
+
+# Aliases
+
+abs = absolute
+bitwise_not = invert
+conj = conjugate
+degrees = rad2deg
+mod = remainder
+radians = deg2rad
+
+__all__ += str('abs bitwise_not conj degrees mod radians').split ()
 
 
 
+
+# Tidied
+
+class TidiedFunctionLibrary (MathFunctionLibrary):
+    """This class makes it a lot easier to implement the Common Interface for new
+    Python classes. In particular, the ways in which math functions can have
+    an optional output array get very annoying to deal with, as does
+    special-casing to deal with zero-dimensional arrays, which you can't
+    index.
+
+    Subclasses of this class can implement “tidy” versions of the standard
+    functions that can assume the following things:
+
+    - The output array is always provided.
+    - The arguments and output have been converted to a common type.
+    - The arguments and output all have the same shape.
+    - The arguments and output are at least one-dimensional.
+
+    The “tidy” version of each function should be implemented in a function
+    whose name has been prefixed with ``tidy_``; e.g., ``multiply`` is
+    implemented in ``tidy_multiply``. You can override the standard tidying
+    effects by simply implementing a function with the un-prefixed name.
+
+    """
+
+    def _tidy_std_unary (self, opname, x, out=None, **kwargs):
+        """The semantics of Numpy's unary ufuncs are more complicated than you might
+        think. If *out* is provided, *x* and *out* must have
+        broadcast-compatible shapes, but *out* must be the "larger" array in a
+        broadcast-y sense. And, it is important to support the case that ``x
+        is out``.
+
+        Numpy distinguishes between "scalars" and "zero-dimensional" arrays,
+        although they are very similar in many aspects. We simplify things by
+        removing this distinction.
+
+        However, we then complicate things by ensuring that the implementation
+        only sees atleast-1D arrays and that the arrays have identical shapes.
+
+        """
+        x = self.typeconvert (x)
+        xsh = self.shape (x)
+
+        if out is None:
+            zerod = (xsh == ())
+            if zerod:
+                x = self.reshape (x, (1,))
+
+            flags = common_interface_functions[opname].flags
+            if flags & Flags.bool_result:
+                out_dtype = np.bool
+            else:
+                out_dtype = self.get_dtype (x)
+
+            retval = out = self.new_empty (xsh, out_dtype)
+            if zerod:
+                retval = self.reshape (out, ())
+        else:
+            retval = out
+            out = self.typeconvert (out)
+            osh = self.shape (out)
+            bsh = broadcast_shapes (xsh, osh)
+            if osh != bsh:
+                raise ValueError ('output parameter must have final broadcasted shape')
+
+            zerod = (bsh == ()) # can only happen if x and out are both zero-D.
+
+            if zerod:
+                x = self.reshape (x, (1,))
+                out = self.reshape (out, (1,))
+            elif xsh != bsh:
+                x = self.broadcast_to (x, bsh)
+
+        getattr (self, 'tidy_' + opname) (x, out, **kwargs)
+        return retval
+
+
+    def _tidy_std_binary (self, opname, x, y, out=None, **kwargs):
+        x = self.typeconvert (x)
+        xsh = self.shape (x)
+        y = self.typeconvert (y)
+        ysh = self.shape (y)
+
+        if out is None:
+            bsh = broadcast_shapes (xsh, ysh)
+            zerod = (bsh == ())
+            if zerod:
+                x = self.reshape (x, (1,))
+                y = self.reshape (y, (1,))
+            else:
+                if xsh != bsh:
+                    x = self.broadcast_to (x, bsh)
+                if ysh != bsh:
+                    y = self.broadcast_to (y, bsh)
+
+            flags = common_interface_functions[opname].flags
+            if flags & Flags.bool_result:
+                out_dtype = np.bool
+            else:
+                out_dtype = np.result_type (self.get_dtype (x), self.get_dtype (y))
+
+            retval = out = self.new_empty (bsh, out_dtype)
+            if zerod:
+                retval = self.reshape (out, ())
+        else:
+            retval = out
+            out = self.typeconvert (out)
+            osh = self.shape (out)
+            bsh = broadcast_shapes (xsh, ysh, osh)
+            if osh != bsh:
+                raise ValueError ('output parameter must have final broadcasted shape')
+
+            zerod = (bsh == ())
+
+            if zerod:
+                x = self.reshape (x, (1,))
+                y = self.reshape (y, (1,))
+                out = self.reshape (out, (1,))
+            else:
+                if xsh != bsh:
+                    x = self.broadcast_to (x, bsh)
+                if ysh != bsh:
+                    y = self.broadcast_to (y, bsh)
+
+        getattr (self, 'tidy_' + opname) (x, y, out, **kwargs)
+        return retval
+
+    # In principle we should also overload the implementations of any ufuncs
+    # with non-standard signatures for which "tidying" makes sense ... but at
+    # the moment I don't see any that fall into that description.
+
+
+def _fill_tidied_library_type ():
+    ni = TidiedFunctionLibrary._not_implemented
+
+    for fs in six.viewvalues (common_interface_functions):
+        if fs.signature == Signatures.std_unary:
+            wrapper = partialmethod (TidiedFunctionLibrary._tidy_std_unary, fs.name)
+        elif fs.signature == Signatures.std_binary:
+            wrapper = partialmethod (TidiedFunctionLibrary._tidy_std_binary, fs.name)
+        else:
+            continue # some function like `reshape` that doesn't make sense to tidy.
+
+        setattr (TidiedFunctionLibrary, fs.name, wrapper)
+        setattr (TidiedFunctionLibrary, 'tidy_' + fs.name, partialmethod (ni, 'tidy_' + fs.name))
+
+_fill_tidied_library_type ()
+
+
+
+
+# Some sugar: the MathlibDelegatingObject class so you can delegate Python
+# math operators to the dispatch mechanism.
 
 class MathlibDelegatingObject (object):
     """Inherit from this class to delegate all math operators to the mathlib
@@ -491,89 +797,57 @@ class MathlibDelegatingObject (object):
         return self._pk_mathlib_library_.absolute (self)
 
     def __invert__ (self):
-        return self._pk_mathlib_library_.bitwise_not (self)
+        return self._pk_mathlib_library_.invert (self)
 
 
 
 
-class TidiedFunctionLibraryMeta (MathFunctionLibraryMeta):
-    # How often do you ever see metaclass inheritance? Not often.
-    def __new__ (cls, name, parents, dct):
-        generic = metaclass_lookup_attribute ('generic_tidy_unary', dct, parents)
+# Simple object for testing TidiedFunctionLibrary
 
-        for opname in all_unary_funcs:
-            metaclass_maybe_add_generic_impl ('tidy_'+opname, dct, parents, generic)
+class TestWrappedLibrary (TidiedFunctionLibrary):
+    def accepts (self, other):
+        return isinstance (other, numpy_types + (TestArrayWrapper,))
 
-        generic = metaclass_lookup_attribute ('generic_tidy_binary', dct, parents)
+    def new_empty (self, shape, dtype):
+        return TestArrayWrapper (np.empty (shape, dtype=dtype))
 
-        for opname in all_binary_funcs:
-            metaclass_maybe_add_generic_impl ('tidy_'+opname, dct, parents, generic)
+    def typeconvert (self, thing):
+        if isinstance (thing, TestArrayWrapper):
+            return thing
+        return TestArrayWrapper (try_asarray (thing))
 
-        return super (TidiedFunctionLibraryMeta, cls).__new__ (cls, name, parents, dct)
+    def broadcast_to (self, x, shape):
+        return TestArrayWrapper (np.broadcast_to (x.data, shape))
+
+    def tidy_negative (self, x, out):
+        print ('TN: <%s %s %s>, <%s %s %s>' % (
+            x.__class__.__name__, self.shape (x), self.get_dtype (x),
+            out.__class__.__name__, self.shape (out), self.get_dtype (out))
+        )
+        out.data[:] = -x.data
+
+    def tidy_add (self, x, y, out):
+        print ('TA: <%s %s %s>, <%s %s %s>, <%s %s %s>' % (
+            x.__class__.__name__, self.shape (x), self.get_dtype (x),
+            y.__class__.__name__, self.shape (y), self.get_dtype (y),
+            out.__class__.__name__, self.shape (out), self.get_dtype (out))
+        )
+        out.data[:] = x.data + y.data
 
 
-class TidiedFunctionLibrary (six.with_metaclass (TidiedFunctionLibraryMeta, MathFunctionLibrary)):
-    """These function libraries need only implement "tidied" versions of the math
-    functions, which can assume that the *out* argument is not None; that all
-    arguments have been coerced to uniform types as much as possible; and that
-    the arguments are not scalars and so can be indexed like arrays.
+class TestArrayWrapper (MathlibDelegatingObject):
+    def __init__ (self, data):
+        self.data = np.asarray (data)
 
-    """
-    def generic_tidy_unary (self, opname, x, out, **kwargs):
-        raise NotImplementedError ('math function "%s" not implemented for objects of type "%s" in %s'
-                                   % (opname, x.__class__.__name__, self))
+    def __repr__ (self):
+        return repr (self.data) + ' [wrapped]'
 
-    def generic_tidy_binary (self, opname, x, y, out, **kwargs):
-        raise NotImplementedError ('math function "%s" not implemented for objects of types "%s" '
-                                   'and "%s" in %s' % (opname, x.__class__.__name__,
-                                                       y.__class__.__name__, self))
+    @property
+    def dtype (self):
+        return self.data.dtype
 
-    def coerce (self, opname, x, y=None, out=None):
-        raise NotImplementedError ()
+    @property
+    def shape (self):
+        return self.data.shape
 
-    def make_output_array (self, opname, x, y=None):
-        raise NotImplementedError ()
-
-    def is_scalar (self, x):
-        return (x.shape == ())
-
-    def atleast_1d (self, x):
-        return x.reshape ((1,))
-
-    def asscalar (self, x):
-        if x.shape == ():
-            return x
-        if x.shape != (1,):
-            raise ValueError ('can only call asscalar() on shape (1,) objects; got %r' % (x.shape,))
-        return x[0]
-
-    def generic_unary (self, opname, x, out=None, **kwargs):
-        x, _, out = self.coerce (opname, x, None, out)
-
-        scalar = self.is_scalar (x)
-        if scalar:
-            x = self.atleast_1d (x)
-        if out is None:
-            out = self.make_output_array (opname, x)
-
-        getattr (self, 'tidy_' + opname) (x, out, **kwargs)
-
-        if scalar:
-            return self.asscalar (out)
-        return out
-
-    def generic_binary (self, opname, x, y, out=None, **kwargs):
-        x, y, out = self.coerce (opname, x, y, out)
-
-        scalar = self.is_scalar (x) and self.is_scalar (y)
-        if scalar:
-            x = self.atleast_1d (x)
-            y = self.atleast_1d (y)
-        if out is None:
-            out = self.make_output_array (opname, x, y)
-
-        getattr (self, 'tidy_' + opname) (x, y, out, **kwargs)
-
-        if scalar:
-            return self.asscalar (out)
-        return out
+    _pk_mathlib_library_ = TestWrappedLibrary ()

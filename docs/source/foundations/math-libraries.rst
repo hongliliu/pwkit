@@ -6,7 +6,7 @@ A Common Interface for math on arrays (:mod:`pwkit.mathlib`)
 ==============================================================================
 
 .. automodule:: pwkit.mathlib
-   :synopsis: Vectorized math functions that work on any data type.
+   :synopsis: Vectorized math functions that work on any array-like type.
 
 .. currentmodule:: pwkit.mathlib
 
@@ -14,17 +14,17 @@ A Common Interface for math on arrays (:mod:`pwkit.mathlib`)
 The “Common Interface”
 ------------------------------------------------------------------------------
 
-The `pwkit.mathlib` module provides a set of free functions mirroring those in
-the :mod:`numpy` module. Unlike those in Numpy, however, these will work
-regardless of whether the input is a Numpy array-like, :class:`pwkit.msmt`
-measurement type, table column, etc. When a function shares the name of a
-Numpy function, the aim is that it has precisely the same semantics. Some of
-the functions below are unique to ``pkwit``, though.
+The `pwkit.mathlib` module provides a set of free functions mirroring many of
+those in the :mod:`numpy` module: the “Common Interface”. Unlike the functions
+in Numpy, however, the ones in this module will work regardless of whether the
+input is a Numpy array-like, :class:`pwkit.msmt` measurement type, table
+column, etc. When a function shares the name of a Numpy function, the aim is
+that it has precisely the same semantics. Some of the functions below are
+unique to ``pkwit``, though.
 
 ================  ===============
   Name              Description
 ================  ===============
-`abs`             Alias for `absolute`.
 `absolute`        Compute absolute value.
 `add`             Compute sum.
 `arccos`          Compute inverse cosine.
@@ -34,24 +34,21 @@ the functions below are unique to ``pkwit``, though.
 `arctan`          Compute inverse tangent.
 `arctan2`         Compute inverse tangent with separate numerator and denominator.
 `arctanh`         Compute inverse hyperbolic tangent.
-`asscalar`        Convert an array to a scalar, assuming it has exactly 1 value.
-`atleast_1d`      Return a view of an array that is at least 1-dimensional.
 `bitwise_and`     Compute bitwise AND; integer types only.
 `bitwise_or`      Compute bitwise OR; integer types only.
-`bitwise_not`     Alias for `invert`.
 `bitwise_xor`     Compute bitwise XOR; integer types only.
+`broadcast_to`    Return a view of the input with a new array shape.
 `cbrt`            Compute cube root.
 `ceil`            Compute ceiling.
 `cmask`           Return a mask based on array contents.
-`conj`            Alias for `conjugate`.
 `conjugate`       Compute complex conjugates.
 `copysign`        Copy sign bits from one set of numbers to another.
 `cos`             Compute cosine.
 `cosh`            Compute hyperbolic cosine.
 `deg2rad`         Convert degrees to radians.
-`degrees`         Alias for `rad2deg`.
 `divide`          Compute ratio, with floor-divide semantics on integers in Python 2.
-`dtype`           Get the data type of array elements.
+`get_dtype`       Get the data type of array elements.
+`get_size`        Get the number of array elements.
 `equal`           Test if values are equal.
 `exp`             Compute the base-e exponential function.
 `exp2`            Compute the base-2 exponential function.
@@ -67,7 +64,6 @@ the functions below are unique to ``pkwit``, though.
 `greater_equal`   Test if values are greater than or equal to others.
 `hypot`           Compute ``sqrt(x**2 + y**2)``.
 `invert`          Compute bitwise negation; integer types only.
-`is_scalar`       Test if the argument array is scalar-compatible.
 `isfinite`        Test if values are finite.
 `isinf`           Test if values are infinite.
 `isnan`           Test if values are NaN.
@@ -87,7 +83,6 @@ the functions below are unique to ``pkwit``, though.
 `logical_xor`     Compute the logical XOR.
 `maximum`         Compute elementwise maximum; NaNs propagate (contra `fmax`)
 `minimum`         Compute elementwise minimum; NaNs propagate (contra `fmin`)
-`mod`             Alias of `remainder`.
 `modf`            Separate numbers into fractional and integral parts.
 `multiply`        Compute the product.
 `negative`        Compute the negation.
@@ -95,10 +90,10 @@ the functions below are unique to ``pkwit``, though.
 `not_equal`       Test if numbers are not equal.
 `power`           Compute exponentiation.
 `rad2deg`         Convert radians to degrees.
-`radians`         Alias for `deg2rad`.
 `reciprocal`      Compute the reciprocal; undesirable behavior for integers.
 `remainder`       Compute remainder of division; inverse sign semantics from `fmod`.
 `repvals`         Get “representative” scalar values from uncertain arrays.
+`reshape`         Return a read-write view of an array with a new shape.
 `right_shift`     Shift bits right; integer types only.
 `rint`            Round values to integers.
 `shape`           Get an array’s shape.
@@ -106,7 +101,6 @@ the functions below are unique to ``pkwit``, though.
 `signbit`         Return true where input is less than zero.
 `sin`             Compute sine.
 `sinh`            Compute hyperbolic sine.
-
 `spacing`         Return distance between inputs and nearest adjacent numbers in their representation.
 `sqrt`            Compute square root.
 `square`          Compute square.
@@ -120,6 +114,19 @@ the functions below are unique to ``pkwit``, though.
 Reference documentation for these functions may be found at the end of this
 page.
 
+There are also a few aliases provided by Numpy that are emulated here:
+
+================  =================
+  Alias Name        Equivalent To
+================  =================
+`abs`             `absolute`
+`bitwise_not`     `invert`
+`conj`            `conjugate`
+`degrees`         `rad2deg`
+`mod`             `remainder`
+`radians`         `deg2rad`
+================  =================
+
 
 How it works
 ------------------------------------------------------------------------------
@@ -130,46 +137,70 @@ Common Interface that’s targeted at those types. Each of these implementations
 is incarnated in an instance of the `MathFunctionLibrary` class, which has one
 method for each function provided in the Common Interface defined above.
 
-.. autoclass:: MathFunctionLibrary
-
-.. automethod:: MathFunctionLibrary.accepts
-.. automethod:: MathFunctionLibrary.generic_unary
-.. automethod:: MathFunctionLibrary.generic_binary
-
 The following function is key to the dispatch process: given some input
-array-like object *x*, it determines which `MathFunctionLibrary` instance
-should be used.
+array-like objects, it determines which `MathFunctionLibrary` instance should
+be used.
 
 .. autofunction:: get_library_for
 
-The Common Interface can be difficult to implement in full generality, since
-the “ufunc” features provided by Numpy have some nontrivial semantics
-regarding the optional *out* parameter, behavior with regard to scalars, and
-so on. The following subclass of `MathFunctionLibrary` takes care of these
-generic challenges to make things easier on implementors.
-
-.. autoclass:: TidiedFunctionLibrary
-.. automethod:: TidiedFunctionLibrary.generic_tidy_unary
-.. automethod:: TidiedFunctionLibrary.generic_tidy_binary
-.. automethod:: TidiedFunctionLibrary.coerce
-.. automethod:: TidiedFunctionLibrary.make_output_array
-
-
-The Numpy function library
-------------------------------------------------------------------------------
-
-An instance of the class is used for execute all math operations on array-like
-objects that stock Numpy can handle. Its implementations of “ufunc” functions
-like ``add`` and ``square`` delegate directly to their Numpy equivalents.
-However, it still needs to implement the methods of the Common Interface that
-aren't in Numpy.
+An instance of a specialized `NumpyFunctionLibrary` class is used to execute
+all math operations on array-like objects that stock Numpy can handle.
 
 .. autoclass:: NumpyFunctionLibrary
-.. automethod:: NumpyFunctionLibrary.cmask
-.. automethod:: NumpyFunctionLibrary.repvals
 
 
-Using :mod:`pwkit.mathlib` to implement standard math operators
+Implementing math for your custom class
+------------------------------------------------------------------------------
+
+If you’re developing a custom array-like class that you want to do math on,
+you should wire it in to the `~pwkit.mathlib` framework. This provides two key
+benefits:
+
+- The free functions in this library will automatically learn how to operate
+  on your objects. This means that if you write code using the
+  `~pwkit.mathlib` functions, it will automatically work on nearly *any* kind
+  of array-like object.
+- You can use the `MathlibDelegatingObject` mixin to instantly make your
+  object correctly overload all of the standard Python operators.
+
+“Wiring a class into the `~pwkit.mathlib` framework” requires only a small
+number of conceptually simple steps:
+
+- Write a `MathFunctionLibrary` subclass that actually implements the math.
+- Set an attribute ``_pk_mathlib_library_`` on your class that points to a
+  (singleton) instance of your new subclass.
+- Optionally, inherit your class from the `MathlibDelegatingObject` mixin to
+  overload all of Python's math operators.
+
+In practice, your math library subclass should almost certainly inherit from
+the `TidiedFunctionLibrary` class, which makes it so that you don’t have to
+deal with a lot of the trickier aspects of the Numpy “ufunc” semantics.
+
+
+Math function library specifics
+------------------------------------------------------------------------------
+
+.. autoclass:: MathFunctionLibrary
+
+To implement a given math operation, simply implement a method on your
+subclass having the same name and signature as the operations listed below;
+although in many cases, your life will be easier if you let
+`TidiedFunctionLibrary` smooth out the ufunc semantics for you.
+
+There are also a few methods of `MathFunctionLibrary` that do not map to
+Common Interface functions, but are needed to glue the system together:
+
+.. automethod:: MathFunctionLibrary.accepts
+.. automethod:: MathFunctionLibrary.new_empty
+.. automethod:: MathFunctionLibrary.typeconvert
+
+Finally:
+
+.. autoclass:: TidiedFunctionLibrary
+
+
+
+`MathlibDelegatingObject`
 ------------------------------------------------------------------------------
 
 You can use a call such as ``pwkit.mathlib.add(x, y)`` function to add
@@ -181,7 +212,7 @@ the appropriate `pwkit.mathlib` functions.
 .. autoclass:: MathlibDelegatingObject
 
 
-Individual function reference
+Individual function reference for the Common Interface
 ------------------------------------------------------------------------------
 
 .. These are all manually documented since their implementations are
@@ -223,14 +254,6 @@ Individual function reference
 
    Compute inverse hyperbolic tangent.
 
-.. function:: asscalar(x)
-
-   Convert an array to a scalar, assuming it has exactly 1 value.
-
-.. function:: atleast_1d(x)
-
-   Return a view of an array that is at least 1-dimensional.
-
 .. function:: bitwise_and(x, y, out=None)
 
    Compute bitwise AND; integer types only.
@@ -243,6 +266,12 @@ Individual function reference
 
    Compute bitwise XOR; integer types only.
 
+.. function:: broadcast_to(x, shape)
+
+   Return a *read-only view* of the input array *x* that has the specified
+   shape. Raises `ValueError` if this is not possible. Only zero-dimensional
+   arrays may be broadcast to a *shape* of ``()``.
+
 .. function:: cbrt(x, out=None)
 
    Compute cube root.
@@ -251,9 +280,17 @@ Individual function reference
 
    Compute ceiling.
 
-.. function:: cmask(x, out=None)
+.. function:: cmask(x, **kwargs)
 
-   Return a mask based on array contents.
+   Return a mask based on array contents. The type of masking done is the
+   logical “AND” of different conditions signified by boolean keyword
+   arguments. The allowed keywords vary depending on the precise array type
+   being used, but standardized ones are:
+
+   ``welldefined``
+     True for array elements that are not NaN.
+   ``finite``
+     True for array elements that are not positive or negative infinity.
 
 .. function:: conjugate(x, out=None)
 
@@ -261,7 +298,7 @@ Individual function reference
 
 .. function:: copysign(x, y, out=None)
 
-   Copy sign bits from one set of numbers to another.
+   Apply the sign bits of *y* to the values of *x*.
 
 .. function:: cos(x, out=None)
 
@@ -279,9 +316,14 @@ Individual function reference
 
    Compute ratio, with floor-divide semantics on integers in Python 2.
 
-.. function:: dtype(x)
+.. function:: get_dtype(x)
 
    Get the data type of array elements.
+
+.. function:: get_size(x)
+
+   Get the number of array elements. Returns 1 for both scalars and
+   zero-dimensional arrays. Returns 0 for arrays with a zero-size axis.
 
 .. function:: equal(x, y, out=None)
 
@@ -321,11 +363,16 @@ Individual function reference
 
 .. function:: fmod(x, y, out=None)
 
-   Compute remainder of division; inverse sign semantics from `remainder`.
+   Compute remainder of division. The remainder has the same sign as the
+   dividend *x*. These are the same sign semantics as the C library function
+   of the same name and the MatLab ``rem`` function. These are the *opposite*
+   sign semantics of the `remainder` function and the standard Python modulus
+   operator ``x % y``.
 
 .. function:: frexp(x, out1=None, out2=None)
 
-   Decompose values into mantissa and twos exponent; inverse of `ldexp`.
+   Decompose values into mantissa and twos exponent; inverse of `ldexp`. The
+   mantissa data type is float; the exponent data type is int.
 
 .. function:: greater(x, y, out=None)
 
@@ -343,10 +390,6 @@ Individual function reference
 
    Compute bitwise negation; integer types only.
 
-.. function:: is_scalar(x, out=None)
-
-   Test if the argument array is scalar-compatible.
-
 .. function:: isfinite(x, out=None)
 
    Test if values are finite.
@@ -361,7 +404,8 @@ Individual function reference
 
 .. function:: ldexp(x, y, out=None)
 
-   Compute ``x * 2**y``; inverse of `frexp`
+   Compute ``x * 2**y``; inverse of `frexp`. *y* must be integer; *x* may not
+   be complex.
 
 .. function:: left_shift(x, y, out=None)
 
@@ -425,7 +469,10 @@ Individual function reference
 
 .. function:: modf(x, out1=None, out2=None)
 
-   Separate numbers into fractional and integral parts.
+   Separate numbers into fractional and integral parts. If a given input is
+   negative, both the fractional and integral parts are negative. Note that
+   both output arrays are returned with floating types, although the second
+   output consists of values rounded to integers.
 
 .. function:: multiply(x, y, out=None)
 
@@ -437,7 +484,8 @@ Individual function reference
 
 .. function:: nextafter(x, y, out=None)
 
-   Return the next floating point number in a certain direction.
+   Return the next floating point value “after” *x*, in the sense that it is
+   towards *y*.
 
 .. function:: not_equal(x, y, out=None)
 
@@ -453,15 +501,28 @@ Individual function reference
 
 .. function:: reciprocal(x, out=None)
 
-   Compute the reciprocal; undesirable behavior for integers.
+   Compute the reciprocal, ``1 / x``. The output array has the same type as
+   the input, which means that this function almost surely has undesirable
+   behavior for integers: any input besides 1 becomes 0.
 
 .. function:: remainder(x, y, out=None)
 
-   Compute remainder of division; inverse sign semantics from `fmod`.
+   Compute remainder of division: ``x - floor (x / y) * y``. The result has
+   the same sign as *y*. This has the same sign semantics as the Python
+   modulus operator ``x % y``. These are the *opposite* sign semantics as the
+   `fmod` function, the C library `fmod` function, and the MatLab ``rem``
+   function.
 
-.. function:: repvals(x, out=None)
+.. function:: repvals(x, **kwargs)
 
    Get “representative” scalar values from uncertain arrays.
+
+.. function:: reshape(x, shape)
+
+   Return a *read-write view* of *x* having new shape *shape*. The total
+   number of elements in the array must be the same, but the shape changes.
+   Zero-dimensional arrays may be interconverted with other array shapes, so
+   long as they have just one element.
 
 .. function:: right_shift(x, y, out=None)
 
@@ -469,15 +530,20 @@ Individual function reference
 
 .. function:: rint(x, out=None)
 
-   Round values to integers.
+   Round values to integers. Note that the output array is still of
+   floating-point type if the input is.
 
 .. function:: shape(x)
 
-   Get an array’s shape.
+   Get an array’s shape. Returns ``()`` for scalars, which means that from the
+   standpoint of this function they are indistinguishable from
+   zero-dimensional arrays — which is not always the case in other situations.
 
 .. function:: sign(x, out=None)
 
-   Compute the signum indicator.
+   Compute the signum indicator: -1 for inputs less than zero, 0 for inputs
+   equal to zero, and +1 for inputs greater than zero. Note that the output
+   data type is the same as the input data type.
 
 .. function:: signbit(x, out=None)
 
