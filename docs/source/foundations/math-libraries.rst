@@ -137,12 +137,6 @@ Common Interface that’s targeted at those types. Each of these implementations
 is incarnated in an instance of the `MathFunctionLibrary` class, which has one
 method for each function provided in the Common Interface defined above.
 
-The following function is key to the dispatch process: given some input
-array-like objects, it determines which `MathFunctionLibrary` instance should
-be used.
-
-.. autofunction:: get_library_for
-
 An instance of a specialized `NumpyFunctionLibrary` class is used to execute
 all math operations on array-like objects that stock Numpy can handle.
 

@@ -38,7 +38,6 @@ MathFunctionLibrary
 NumpyFunctionLibrary
 numpy_library
 numpy_types
-get_library_for
 TidiedFunctionLibrary
 MathlibDelegatingObject
 ''').split ()
@@ -153,11 +152,15 @@ class FunctionSpecification (object):
     name = None
     signature = None
     flags = Flags.none
+    _impl = None
 
     def __init__ (self, name, signature, flags):
         self.name = name
         self.signature = signature
         self.flags = flags
+
+    def __call__ (self, *args, **kwargs):
+        return self._impl (*args, **kwargs)
 
 
 FS = FunctionSpecification # temporary for init
@@ -418,11 +421,13 @@ numpy_library = NumpyFunctionLibrary ()
 
 
 
-# Now we can implement get_library_for() and the actual implementations of the
-# freestanding Common Interface functions, which just look up the appropriate
-# MathFunctionLibrary instance and delegate to it.
+# Now we can implement _get_library_for() and the actual implementations of
+# the freestanding Common Interface functions. These handle objects with
+# __array__ and __array_wrap__ -- which are best handled separately -- and
+# look up the right MathFunctionLibrary once all the wrapping and unwrapping
+# has been dealt with.
 
-def get_library_for (*objects):
+def _get_library_for (*objects):
     """Given array-like objects, return a `MathFunctionLibrary` instance that can
     perform Common Interface math functions on all of them.
 
@@ -464,25 +469,61 @@ def get_library_for (*objects):
 
 
 def _dispatch_std_unary (name, x, out=None, **kwargs):
-    if out is None:
-        library = get_library_for (x)
-    else:
-        library = get_library_for (x, out)
+    rewrap = lambda x: x
+    unwrap = getattr (x, '__array__', None)
 
-    return getattr (library, name) (x, out, **kwargs)
+    if unwrap is not None:
+        if out is None:
+            rewrap = x.__array_wrap__
+        x = unwrap ()
+
+    if out is None:
+        library = _get_library_for (x)
+    else:
+        unwrap = getattr (out, '__array__', None)
+        if unwrap is not None:
+            out = unwrap ()
+        library = _get_library_for (x, out)
+
+    return rewrap (getattr (library, name) (x, out, **kwargs))
 
 
 def _dispatch_std_binary (name, x, y, out=None, **kwargs):
-    if out is None:
-        library = get_library_for (x, y)
-    else:
-        library = get_library_for (x, y, out)
+    rewrap = lambda x: x
+    xpriority = -10000
+    unwrap = getattr (x, '__array__', None)
 
-    return getattr (library, name) (x, y, out, **kwargs)
+    if unwrap is not None:
+        xpriority = getattr (x, '__array_priority__', 0)
+        if out is None:
+            rewrap = x.__array_wrap__
+        x = unwrap ()
+
+    unwrap = getattr (y, '__array__', None)
+
+    if unwrap is not None:
+        ypriority = getattr (y, '__array_priority__', 0)
+        if out is None and ypriority > xpriority:
+            rewrap = y.__array_wrap__
+        y = unwrap ()
+
+    if out is None:
+        library = _get_library_for (x, y)
+    else:
+        unwrap = getattr (out, '__array__', None)
+        if unwrap is not None:
+            out = unwrap ()
+        library = _get_library_for (x, y, out)
+
+    return rewrap (getattr (library, name) (x, y, out, **kwargs))
 
 
 def _dispatch_other_1 (name, x, *args, **kwargs):
-    library = get_library_for (x)
+    unwrap = getattr (x, '__array__', None)
+    if unwrap is not None:
+        x = unwrap ()
+
+    library = _get_library_for (x)
     return getattr (library, name) (x, *args, **kwargs)
 
 
@@ -498,7 +539,7 @@ def _create_wrappers (namespace):
 
     """
     for fs in six.viewvalues (common_interface_functions):
-        namespace[fs.name] = partial (_dispatchers[fs.signature], fs.name)
+        namespace[fs.name] = fs._impl = partial (_dispatchers[fs.signature], fs.name)
 
 _create_wrappers (globals ())
 __all__ += list (six.viewkeys (common_interface_functions))
@@ -710,7 +751,7 @@ class MathlibDelegatingObject (object):
     # https://docs.python.org/2/reference/datamodel.html#basic-customization
 
     def __dispatch_binary (self, name, other):
-        return getattr (get_library_for (self, other), name) (self, other)
+        return common_interface_functions[name]._impl (self, other)
 
     __lt__ = partialmethod (__dispatch_binary, 'less')
     __le__ = partialmethod (__dispatch_binary, 'less_equal')
@@ -731,7 +772,7 @@ class MathlibDelegatingObject (object):
     def __pow__ (self, other, modulo=None):
         if modulo is not None:
             raise NotImplementedError ()
-        return getattr (get_library_for (self, other), 'power') (self, other)
+        return common_interface_functions['power']._impl (self, other)
 
     __lshift__ = partialmethod (__dispatch_binary, 'left_shift')
     __rshift__ = partialmethod (__dispatch_binary, 'right_shift')
@@ -742,7 +783,7 @@ class MathlibDelegatingObject (object):
     __truediv__ = partialmethod (__dispatch_binary, 'true_divide')
 
     def __dispatch_binary_reflected (self, name, other):
-        return getattr (get_library_for (other, self), name) (other, self)
+        return common_interface_functions[name]._impl (other, self)
 
     __radd__ = partialmethod (__dispatch_binary_reflected, 'add')
     __rsub__ = partialmethod (__dispatch_binary_reflected, 'subtract')
@@ -756,7 +797,7 @@ class MathlibDelegatingObject (object):
     def __rpow__ (self, other, modulo=None):
         if modulo is not None:
             raise NotImplementedError ()
-        return getattr (get_library_for (self, other), 'power') (other, self)
+        return common_interface_functions['power']._impl (other, self)
 
     __rlshift__ = partialmethod (__dispatch_binary_reflected, 'left_shift')
     __rrshift__ = partialmethod (__dispatch_binary_reflected, 'right_shift')
@@ -765,7 +806,8 @@ class MathlibDelegatingObject (object):
     __ror__ = partialmethod (__dispatch_binary_reflected, 'bitwise_or')
 
     def __dispatch_binary_inplace (self, name, other):
-        return getattr (get_library_for (self, other), name) (self, other, self)
+        common_interface_functions[name]._impl (self, other, self)
+        return self
 
     __iadd__ = partialmethod (__dispatch_binary_inplace, 'add')
     __isub__ = partialmethod (__dispatch_binary_inplace, 'subtract')
@@ -779,7 +821,8 @@ class MathlibDelegatingObject (object):
     def __ipow__ (self, other, modulo=None):
         if modulo is not None:
             raise NotImplementedError ()
-        return getattr (get_library_for (self, other), 'power') (self, other, self)
+        common_interface_functions['power']._impl (self, other, self)
+        return self
 
     __ilshift__ = partialmethod (__dispatch_binary_inplace, 'left_shift')
     __irshift__ = partialmethod (__dispatch_binary_inplace, 'right_shift')
@@ -788,16 +831,16 @@ class MathlibDelegatingObject (object):
     __ior__ = partialmethod (__dispatch_binary_inplace, 'bitwise_or')
 
     def __neg__ (self):
-        return self._pk_mathlib_library_.negative (self)
+        return common_interface_functions['negative']._impl (self)
 
     #def __pos__ (self):
     #    raise NotImplementedError
 
     def __abs__ (self):
-        return self._pk_mathlib_library_.absolute (self)
+        return common_interface_functions['absolute']._impl (self)
 
     def __invert__ (self):
-        return self._pk_mathlib_library_.invert (self)
+        return common_interface_functions['invert']._impl (self)
 
 
 
