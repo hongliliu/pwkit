@@ -237,7 +237,7 @@ common_interface_functions = dict ((s.name, s) for s in [
     FS ('reciprocal',    s.std_unary,   f.has_numpy_impl),
     FS ('remainder',     s.std_binary,  f.has_numpy_impl),
     FS ('repvals',       s.std_unary,   f.none),
-    FS ('reshape',       s.other_1,     f.has_numpy_impl),
+    FS ('reshape',       s.other_1,     f.none),
     FS ('right_shift',   s.std_binary,  f.has_numpy_impl | f.ints_only),
     FS ('rint',          s.std_unary,   f.has_numpy_impl),
     FS ('shape',         s.other_1,     f.has_numpy_impl),
@@ -375,6 +375,7 @@ class NumpyFunctionLibrary (MathFunctionLibrary):
     def append (self, x, y):
         return np.concatenate ((x, y))
 
+
     def cmask (self, x, welldefined=False, finite=False):
         x = np.asarray (x)
         zerod = (x.shape == ())
@@ -403,6 +404,13 @@ class NumpyFunctionLibrary (MathFunctionLibrary):
 
     def repvals (self, x):
         return np.array (x, copy=True)
+
+
+    def reshape (self, x, s):
+        # I'm not sure why we can't just have this be implemented with
+        # np.reshape ... but I got some infinite recursion that makes me
+        # believe that we can't.
+        return np.asarray (x).reshape (s)
 
     # The implementations for the bulk of the Common Interface functions,
     # which just delegate to Numpy, are added in below.
