@@ -49,6 +49,7 @@ unique to ``pkwit``, though.
 `divide`          Compute ratio, with floor-divide semantics on integers in Python 2.
 `get_dtype`       Get the data type of array elements.
 `get_size`        Get the number of array elements.
+`empty_like`      Return a new, uninitialized array like an existing one.
 `equal`           Test if values are equal.
 `exp`             Compute the base-e exponential function.
 `exp2`            Compute the base-2 exponential function.
@@ -209,8 +210,8 @@ the appropriate `pwkit.mathlib` functions.
 Individual function reference for the Common Interface
 ------------------------------------------------------------------------------
 
-.. These are all manually documented since their implementations are
-   automatically generated within the module. Bummer.
+.. These are (almost) all manually documented since their implementations are
+   (almost all) automatically generated within the module. Bummer.
 
 .. function:: absolute(x, out=None)
 
@@ -318,6 +319,8 @@ Individual function reference for the Common Interface
 
    Get the number of array elements. Returns 1 for both scalars and
    zero-dimensional arrays. Returns 0 for arrays with a zero-size axis.
+
+.. autofunction:: empty_like
 
 .. function:: equal(x, y, out=None)
 

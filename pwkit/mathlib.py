@@ -568,6 +568,38 @@ radians = deg2rad
 __all__ += str('abs bitwise_not conj degrees mod radians').split ()
 
 
+# These functions largely leverage the mathlib machinery, but don't map
+# exactly to Common Interface functions -- because the underlying shared
+# implementation is one that doesn't necessarily take an array-like as its
+# first argument.
+
+def empty_like (x, shape=None, dtype=None):
+    """Return a new, uninitialized array-like object similar to *x*.
+
+    If the *shape* or *dtype* keyword arguments are provided, they will be
+    used in specifying those properties of the new object; otherwise, the
+    current values of *x* will be used.
+
+    """
+    rewrap = lambda x: x
+    unwrap = getattr (x, '__array__', None)
+
+    if unwrap is not None:
+        rewrap = x.__array_wrap__
+        x = unwrap ()
+
+    library = _get_library_for (x)
+
+    if shape is None:
+        shape = library.get_shape (x)
+    if dtype is None:
+        dtype = library.get_dtype (x)
+
+    return rewrap (library.new_empty (shape, dtype))
+
+__all__ += str('empty_like').split ()
+
+
 
 
 # Tidied
