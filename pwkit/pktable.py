@@ -1,5 +1,5 @@
 # -*- mode: python; coding: utf-8 -*-
-# Copyright 2015 Peter Williams <peter@newton.cx> and collaborators.
+# Copyright 2015-2016 Peter Williams <peter@newton.cx> and collaborators.
 # Licensed under the MIT license.
 
 """pwkit.pktable - I can't believe I'm writing my own table class.
@@ -20,7 +20,7 @@ from collections import OrderedDict
 from six.moves import range
 import numpy as np
 from .oo_helpers import indexerproperty
-from .mathlib import MathlibDelegatingObject, TidiedFunctionLibrary, get_library_for, numpy_types
+from .mathlib import MathlibDelegatingObject, try_asarray
 
 
 def _is_sequence (thing):
@@ -824,6 +824,17 @@ class ScalarColumn (PKTableColumnABC, MathlibDelegatingObject):
 
         return cls (None, _data=a)
 
+    __array_priority__ = 500
+
+    def __array__ (self):
+        return self._data
+
+    def __array_wrap__ (self, other):
+        a = try_asarray (other)
+        if a.ndim != 1:
+            raise ValueError ('only one-dimensional arrays may be converted to columns; got %r' % (other,))
+        return self.__class__ (None, _data=a)
+
     @property
     def dtype (self):
         return self._data.dtype
@@ -865,72 +876,6 @@ class ScalarColumn (PKTableColumnABC, MathlibDelegatingObject):
 
     def __setitem__ (self, key, value):
         self._data[key] = value
-
-
-class PKColumnFunctionLibrary (TidiedFunctionLibrary):
-    def __init__ (self, coltype):
-        self.coltype = coltype
-
-    def accepts (self, opname, other):
-        return isinstance (other, numpy_types + (self.coltype,))
-
-    def _coerce_one (self, v):
-        if v is None:
-            return v
-
-        if isinstance (v, self.coltype):
-            return v
-
-        return self.coltype (None, _data=np.asarray (v))
-
-    def coerce (self, opname, x, y=None, out=None):
-        return self._coerce_one (x), self._coerce_one (y), self._coerce_one (out)
-
-    def is_scalar (self, x):
-        return False
-
-    def atleast_1d (self, x):
-        return x
-
-    def make_output_array (self, opname, x, y=None):
-        if y is None:
-            shape = x._data.shape
-            dtype = x._data.dtype
-        else:
-            shape = np.broadcast (x._data, y._data).shape
-            dtype = np.result_type (x._data.dtype, y._data.dtype)
-
-        if len (shape) != 1:
-            raise TypeError ('math with PKTableColumns may only yield 1-dimensional '
-                             'arrays; got %r' % shape)
-
-        if opname == 'repvals':
-            return np.empty (shape, dtype=dtype)
-
-        if opname in ('equal greater greater_equal isfinite isinf isnan less less_equal logical_and logical_not logical_or logical_xor not_equal'.split ()):
-            dtype = np.bool
-
-        return self.coltype.new_like (x, dtype=dtype, length=shape[0])
-
-    def generic_tidy_unary (self, opname, x, out):
-        dlib = get_library_for (x._data)
-        # ``[5:]`` strips the tidy_ prefix
-        if opname[5:] == 'repvals':
-            outdata = out
-        else:
-            outdata = out._data
-        getattr (dlib, opname[5:]) (x._data, outdata)
-        return out
-
-    def generic_tidy_binary (self, opname, x, y, out):
-        dlib = get_library_for (x._data, y._data)
-        # ``[5:]`` strips the tidy_ prefix
-        getattr (dlib, opname[5:]) (x._data, y._data, out._data)
-        return out
-
-
-scalar_column_function_library = PKColumnFunctionLibrary (ScalarColumn)
-ScalarColumn._pk_mathlib_library_ = scalar_column_function_library
 
 
 
@@ -1034,6 +979,23 @@ class MeasurementColumn (PKTableColumnABC, MathlibDelegatingObject):
         from .msmt import Domain
         self._data.domain = Domain.normalize (domain)
 
+    __array_priority__ = 2000
+
+    def __array__ (self):
+        """This is actually a bit bogus since we won't be returning a true
+        numpy.ndarray object, but nothing involving us is going to work
+        without going through mathlib anyway, so whatever.
+
+        """
+        return self._data
+
+    def __array_wrap__ (self, other):
+        from .msmt import try_as_measurement
+        a = try_as_measurement (other)
+        if a.ndim != 1:
+            raise ValueError ('only one-dimensional arrays may be converted to columns; got %r' % (other,))
+        return self.__class__ (None, _data=a)
+
     @property
     def dtype (self):
         return self._data.dtype
@@ -1065,45 +1027,6 @@ class MeasurementColumn (PKTableColumnABC, MathlibDelegatingObject):
 
     def __setitem__ (self, key, value):
         self._data[key] = value
-
-
-class MeasurementColumnFunctionLibrary (PKColumnFunctionLibrary):
-    def __init__ (self):
-        super (MeasurementColumnFunctionLibrary, self).__init__ (MeasurementColumn)
-
-    def accepts (self, opname, other):
-        from .msmt import Approximate, Sampled
-        return isinstance (other, numpy_types + (self.coltype, Approximate, Sampled))
-
-    def _coerce_one (self, v):
-        if v is None:
-            return v
-
-        if isinstance (v, self.coltype):
-            return v
-
-        from .msmt import Approximate, Sampled
-
-        if isinstance (v, (Approximate, Sampled)):
-            return self.coltype (None, _data=v)
-
-        return self.coltype (None, _data=Approximate.from_other (v))
-
-    def power (self, x, y, out=None):
-        """We need to wrap this specially since Measurements are restrictive about
-        what values you can pass to their power() functions.
-
-        """
-        if isinstance (x, MeasurementColumn):
-            x = x._data
-        if isinstance (y, MeasurementColumn):
-            y = y._data
-
-        dlib = get_library_for (x, y)
-        return getattr (dlib, 'power') (x, y, out)
-
-measurement_column_function_library = MeasurementColumnFunctionLibrary ()
-MeasurementColumn._pk_mathlib_library_ = measurement_column_function_library
 
 
 
