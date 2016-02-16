@@ -489,31 +489,42 @@ def _dispatch_std_unary (name, x, out=None, **kwargs):
 
 
 def _dispatch_std_binary (name, x, y, out=None, **kwargs):
-    rewrap = lambda x: x
-    xpriority = -10000
+    """We have to be a bit careful about how we deal with wrapping and unwrapping
+    arrays. Say x is a measurement and y is an ndarray. x does not provide
+    __array_wrap__, but y does. If we don't pay attention to x's
+    __array_priority__, we end up trying to call ndarray.__array_wrap__ on a
+    Measurement, which makes it barf.
+
+    """
     unwrap = getattr (x, '__array__', None)
+    xpriority = getattr (x, '__array_priority__', 0)
+    xrewrap = getattr (x, '__array_wrap__', None)
 
     if unwrap is not None:
-        xpriority = getattr (x, '__array_priority__', 0)
-        if out is None:
-            rewrap = x.__array_wrap__
         x = unwrap ()
 
     unwrap = getattr (y, '__array__', None)
+    ypriority = getattr (y, '__array_priority__', 0)
+    yrewrap = getattr (y, '__array_wrap__', None)
 
     if unwrap is not None:
-        ypriority = getattr (y, '__array_priority__', 0)
-        if out is None and ypriority > xpriority:
-            rewrap = y.__array_wrap__
         y = unwrap ()
 
-    if out is None:
-        library = _get_library_for (x, y)
-    else:
+    rewrap = lambda x: x
+
+    if out is not None:
         unwrap = getattr (out, '__array__', None)
         if unwrap is not None:
             out = unwrap ()
         library = _get_library_for (x, y, out)
+    else:
+        library = _get_library_for (x, y)
+
+        if xpriority >= ypriority:
+            if xrewrap is not None:
+                rewrap = xrewrap
+        elif yrewrap is not None:
+            rewrap = yrewrap
 
     return rewrap (getattr (library, name) (x, y, out, **kwargs))
 

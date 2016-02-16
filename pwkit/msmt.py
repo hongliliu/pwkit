@@ -267,10 +267,12 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, MathlibDelegatingObject))
     # mathlib convenience
 
     def cmask (self, **kwargs):
-        return self._pk_mathlib_library_.cmask (self, **kwargs)
+        from .mathlib import common_interface_functions
+        return common_interface_functions['cmask'] (self, **kwargs)
 
     def repvals (self, **kwargs):
-        return self._pk_mathlib_library_.repvals (self, **kwargs)
+        from .mathlib import common_interface_functions
+        return common_interface_functions['repvals'] (self, **kwargs)
 
 
     # Stringification
@@ -314,13 +316,6 @@ class MeasurementFunctionLibrary (TidiedFunctionLibrary):
     - reciprocal
 
     """
-    def make_output_array (self, opname, x, y=None):
-        """Create a new array to hold the output of mathlib operation *opname*, given
-        inputs *x* and *y*. *y* may be None if the operation is unary.
-
-        """
-        raise NotImplementedError ()
-
     def fill_from_broadcasted (self, x, out):
         """Fill *out* with the values from *x*, broadcasting as appropriate.
 
@@ -333,16 +328,6 @@ class MeasurementFunctionLibrary (TidiedFunctionLibrary):
 
         """
         raise NotImplementedError ()
-
-    def coerce_one (self, x):
-        """Convert an arbitrary numerical-ish object into the right type.
-
-        """
-        raise NotImplementedError ()
-
-
-    def coerce (self, opname, x, y=None, out=None):
-        return self.coerce_one (x), self.coerce_one (y), self.coerce_one (out)
 
 
     def tidy_expm1 (self, x, out):
@@ -381,7 +366,7 @@ class MeasurementFunctionLibrary (TidiedFunctionLibrary):
 
     def power (self, x, y, out=None):
         # Note that this is intentionally not a "tidy" function because we
-        # don't want automatic coercion of the arguments to a common type.
+        # don't want automatic conversion of the arguments to a common type.
 
         try:
             v = float (x)
@@ -389,7 +374,7 @@ class MeasurementFunctionLibrary (TidiedFunctionLibrary):
             # You might not think that this is common functionality, but it's
             # important for undoing logarithms; i.e. 10**x.
             if out is None:
-                out = self.make_output_array ('multiply', y)
+                out = self.new_empty (y.shape, y.dtype)
             self.multiply (y, np.log (v), out)
             self.exp (out, out)
             return out
@@ -402,7 +387,7 @@ class MeasurementFunctionLibrary (TidiedFunctionLibrary):
             raise ValueError ('measurements can only be exponentiated by exact values')
 
         if out is None:
-            out = self.make_output_array ('log', x)
+            out = self.new_empty (x.shape, x.dtype)
 
         if v == 0:
             self.fill_unity_like (x, out)
@@ -446,7 +431,7 @@ class MeasurementFunctionLibrary (TidiedFunctionLibrary):
     def tidy_subtract (self, x, y, out):
         # We have to allocate a temporary in case `x is out`. Or you know we could
         # just implement the function.
-        temp = self.make_output_array ('subtract', y)
+        temp = self.new_empty (y.shape, y.dtype)
         self.negative (y, temp)
         self.add (x, temp, out)
         return out
@@ -455,7 +440,7 @@ class MeasurementFunctionLibrary (TidiedFunctionLibrary):
     def tidy_true_divide (self, x, y, out):
         # We have to allocate a temporary in case `x is out`. Or you know we could
         # just implement the function.
-        temp = self.make_output_array ('reciprocal', y)
+        temp = self.new_empty (y.shape, y.dtype)
         self.reciprocal (y, temp)
         self.multiply (x, temp, out)
         return out
@@ -605,11 +590,15 @@ class Sampled (MeasurementABC):
 
 
 class SampledFunctionLibrary (MeasurementFunctionLibrary):
-    def accepts (self, opname, other):
+    def accepts (self, other):
         return isinstance (other, numpy_types + (Sampled,))
 
 
-    def coerce_one (self, x):
+    def new_empty (self, shape, dtype):
+        return Sampled (Domain.anything, shape, dtype=dtype, _noinit=True)
+
+
+    def typeconvert (self, x):
         if x is None:
             return None
 
@@ -635,28 +624,28 @@ class SampledFunctionLibrary (MeasurementFunctionLibrary):
         return Sampled.from_exact_array (domain, Kind.msmt, a)
 
 
-    def atleast_1d (self, x):
-        data = np.atleast_1d (x.data)
+    def broadcast_to (self, x, shape):
+        zerod = (shape == ())
+        if zerod:
+            shape = (1,)
+
+        data = np.broadcast_to (x.data, shape)
         rv = Sampled (x.domain, data.shape, _noalloc=True)
         rv.data = data
-        rv._zerod = False
+        rv._zerod = zerod
         return rv
 
 
-    def make_output_array (self, opname, x, y=None):
-        if y is None:
-            shape = x.shape
-            sdtype = x.dtype
-        else:
-            shape = np.broadcast (x, y).shape
-            sdtype = np.result_type (x.dtype, y.dtype)
+    def reshape (self, x, shape):
+        zerod = (shape == ())
+        if zerod:
+            shape = (1,)
 
-        if opname == 'cmask':
-            return np.empty (shape, dtype=np.bool)
-        elif opname == 'repvals':
-            return np.empty (shape, dtype=sdtype)
-
-        return Sampled (Domain.anything, shape, dtype=sdtype, _noinit=True)
+        data = x.data.reshape (shape)
+        rv = Sampled (x.domain, data.shape, _noalloc=True)
+        rv.data = data
+        rv._zerod = zerod
+        return rv
 
 
     def fill_from_broadcasted (self, x, out):
@@ -983,11 +972,15 @@ class Approximate (MeasurementABC):
 
 
 class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
-    def accepts (self, opname, other):
+    def accepts (self, other):
         return isinstance (other, numpy_types + (Approximate,))
 
 
-    def coerce_one (self, x):
+    def new_empty (self, shape, dtype):
+        return Approximate (Domain.anything, shape, dtype=dtype, _noinit=True)
+
+
+    def typeconvert (self, x):
         if x is None:
             return None
 
@@ -1013,28 +1006,28 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
         return Approximate.from_other (a, domain=domain)
 
 
-    def atleast_1d (self, x):
-        data = np.atleast_1d (x.data)
+    def broadcast_to (self, x, shape):
+        zerod = (shape == ())
+        if zerod:
+            shape = (1,)
+
+        data = np.broadcast_to (x.data, shape)
         rv = Approximate (x.domain, data.shape, _noalloc=True)
         rv.data = data
-        rv._zerod = False
+        rv._zerod = zerod
         return rv
 
 
-    def make_output_array (self, opname, x, y=None):
-        if y is None:
-            shape = x.shape
-            sdtype = x.dtype
-        else:
-            shape = np.broadcast (x, y).shape
-            sdtype = np.result_type (x.dtype, y.dtype)
+    def reshape (self, x, shape):
+        zerod = (shape == ())
+        if zerod:
+            shape = (1,)
 
-        if opname == 'cmask':
-            return np.empty (shape, dtype=np.bool)
-        elif opname == 'repvals':
-            return np.empty (shape, dtype=sdtype)
-
-        return Approximate (Domain.anything, shape, dtype=sdtype, _noinit=True)
+        data = x.data.reshape (shape)
+        rv = Approximate (x.domain, data.shape, _noalloc=True)
+        rv.data = data
+        rv._zerod = zerod
+        return rv
 
 
     def fill_from_broadcasted (self, x, out):
