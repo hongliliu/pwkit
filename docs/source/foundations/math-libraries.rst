@@ -27,6 +27,7 @@ unique to ``pkwit``, though.
 ================  ===============
 `absolute`        Compute absolute value.
 `add`             Compute sum.
+`append`          Concatenate two arrays.
 `arccos`          Compute inverse cosine.
 `arccosh`         Compute inverse hyperbolic cosine.
 `arcsin`          Compute inverse sine.
@@ -220,6 +221,12 @@ Individual function reference for the Common Interface
 .. function:: add(x, y, out=None)
 
    Compute sum.
+
+.. function:: append(x, y)
+
+   Concatenate two arrays. The implementation of the Common Interface that is
+   used is determined solely from *x*; therefore, something like
+   ``mathlib.append (np.ones (4), pd.Series([2]))`` will fail.
 
 .. function:: arccos(x, out=None)
 

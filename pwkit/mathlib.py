@@ -170,6 +170,7 @@ f = Flags
 common_interface_functions = dict ((s.name, s) for s in [
     FS ('absolute',      s.std_unary,   f.has_numpy_impl),
     FS ('add',           s.std_binary,  f.has_numpy_impl),
+    FS ('append',        s.other_1,     f.none),
     FS ('arccos',        s.std_unary,   f.has_numpy_impl),
     FS ('arccosh',       s.std_unary,   f.has_numpy_impl),
     FS ('arcsin',        s.std_unary,   f.has_numpy_impl),
@@ -371,6 +372,9 @@ class NumpyFunctionLibrary (MathFunctionLibrary):
     # Implementations of the few Common Interface functions that are *not*
     # provided by Numpy itself:
 
+    def append (self, x, y):
+        return np.concatenate ((x, y))
+
     def cmask (self, x, welldefined=False, finite=False):
         x = np.asarray (x)
         zerod = (x.shape == ())
@@ -411,6 +415,9 @@ def _fill_numpy_library_type ():
 
     """
     for fs in six.viewvalues (common_interface_functions):
+        if not (fs.flags & Flags.has_numpy_impl):
+            continue
+
         impl = getattr (np, fs.name, None)
         if impl is not None:
             setattr (NumpyFunctionLibrary, fs.name, impl)

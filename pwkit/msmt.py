@@ -590,12 +590,66 @@ class Sampled (MeasurementABC):
 
 
 class SampledFunctionLibrary (MeasurementFunctionLibrary):
+    # Lots of housekeeping ...
+
     def accepts (self, other):
         return isinstance (other, numpy_types + (Sampled,))
 
 
+    def append (self, x, y):
+        y = self.typeconvert (y)
+        data = np.concatenate ((x.data, y.data))
+        zerod = (data.shape == ())
+        if zerod:
+            data = np.atleast_1d (data)
+        rv = Sampled (x.domain, data.shape, _noalloc=True)
+        rv.data = data
+        rv._zerod = zerod
+        return rv
+
+
+    def broadcast_to (self, x, shape):
+        zerod = (shape == ())
+        if zerod:
+            shape = (1,)
+
+        data = np.broadcast_to (x.data, shape)
+        rv = Sampled (x.domain, data.shape, _noalloc=True)
+        rv.data = data
+        rv._zerod = zerod
+        return rv
+
+
+    def fill_from_broadcasted (self, x, out):
+        out.domain = x.domain
+        out.data['kind'] = x.data['kind']
+        out.data['samples'] = x.data['samples']
+
+
+    def fill_unity_like (self, x, out):
+        out.domain = Domain.nonnegative
+        m = (x.data['kind'] != Kind.undef)
+        out.data['kind'][m] = Kind.msmt
+        out.data['samples'][m] = 1
+        m = ~m
+        out.data['kind'][m] = Kind.undef
+        out.data['samples'][m] = np.nan
+
+
     def new_empty (self, shape, dtype):
         return Sampled (Domain.anything, shape, dtype=dtype, _noinit=True)
+
+
+    def reshape (self, x, shape):
+        zerod = (shape == ())
+        if zerod:
+            shape = (1,)
+
+        data = x.data.reshape (shape)
+        rv = Sampled (x.domain, data.shape, _noalloc=True)
+        rv.data = data
+        rv._zerod = zerod
+        return rv
 
 
     def typeconvert (self, x):
@@ -622,46 +676,6 @@ class SampledFunctionLibrary (MeasurementFunctionLibrary):
             domain = Domain.anything
 
         return Sampled.from_exact_array (domain, Kind.msmt, a)
-
-
-    def broadcast_to (self, x, shape):
-        zerod = (shape == ())
-        if zerod:
-            shape = (1,)
-
-        data = np.broadcast_to (x.data, shape)
-        rv = Sampled (x.domain, data.shape, _noalloc=True)
-        rv.data = data
-        rv._zerod = zerod
-        return rv
-
-
-    def reshape (self, x, shape):
-        zerod = (shape == ())
-        if zerod:
-            shape = (1,)
-
-        data = x.data.reshape (shape)
-        rv = Sampled (x.domain, data.shape, _noalloc=True)
-        rv.data = data
-        rv._zerod = zerod
-        return rv
-
-
-    def fill_from_broadcasted (self, x, out):
-        out.domain = x.domain
-        out.data['kind'] = x.data['kind']
-        out.data['samples'] = x.data['samples']
-
-
-    def fill_unity_like (self, x, out):
-        out.domain = Domain.nonnegative
-        m = (x.data['kind'] != Kind.undef)
-        out.data['kind'][m] = Kind.msmt
-        out.data['samples'][m] = 1
-        m = ~m
-        out.data['kind'][m] = Kind.undef
-        out.data['samples'][m] = np.nan
 
 
     # The actual core math functions
@@ -972,12 +986,69 @@ class Approximate (MeasurementABC):
 
 
 class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
+    # Lots of housekeeping functions ...
+
     def accepts (self, other):
         return isinstance (other, numpy_types + (Approximate,))
 
 
+    def append (self, x, y):
+        y = self.typeconvert (y)
+        data = np.concatenate ((x.data, y.data))
+        zerod = (data.shape == ())
+        if zerod:
+            data = np.atleast_1d (data)
+        rv = Approximate (x.domain, data.shape, _noalloc=True)
+        rv.data = data
+        rv._zerod = zerod
+        return rv
+
+
+    def broadcast_to (self, x, shape):
+        zerod = (shape == ())
+        if zerod:
+            shape = (1,)
+
+        data = np.broadcast_to (x.data, shape)
+        rv = Approximate (x.domain, data.shape, _noalloc=True)
+        rv.data = data
+        rv._zerod = zerod
+        return rv
+
+
+    def fill_from_broadcasted (self, x, out):
+        out.domain = x.domain
+        out.data['kind'] = x.data['kind']
+        out.data['x'] = x.data['x']
+        out.data['u'] = x.data['u']
+
+
+    def fill_unity_like (self, x, out):
+        out.domain = Domain.nonnegative
+        m = (x.data['kind'] != Kind.undef)
+        out.data['kind'][m] = Kind.msmt
+        out.data['x'][m] = 1
+        out.data['u'][m] = 0
+        m = ~m
+        out.data['kind'][m] = Kind.undef
+        out.data['x'][m] = np.nan
+        out.data['u'][m] = np.nan
+
+
     def new_empty (self, shape, dtype):
         return Approximate (Domain.anything, shape, dtype=dtype, _noinit=True)
+
+
+    def reshape (self, x, shape):
+        zerod = (shape == ())
+        if zerod:
+            shape = (1,)
+
+        data = x.data.reshape (shape)
+        rv = Approximate (x.domain, data.shape, _noalloc=True)
+        rv.data = data
+        rv._zerod = zerod
+        return rv
 
 
     def typeconvert (self, x):
@@ -1004,49 +1075,6 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
             domain = Domain.anything
 
         return Approximate.from_other (a, domain=domain)
-
-
-    def broadcast_to (self, x, shape):
-        zerod = (shape == ())
-        if zerod:
-            shape = (1,)
-
-        data = np.broadcast_to (x.data, shape)
-        rv = Approximate (x.domain, data.shape, _noalloc=True)
-        rv.data = data
-        rv._zerod = zerod
-        return rv
-
-
-    def reshape (self, x, shape):
-        zerod = (shape == ())
-        if zerod:
-            shape = (1,)
-
-        data = x.data.reshape (shape)
-        rv = Approximate (x.domain, data.shape, _noalloc=True)
-        rv.data = data
-        rv._zerod = zerod
-        return rv
-
-
-    def fill_from_broadcasted (self, x, out):
-        out.domain = x.domain
-        out.data['kind'] = x.data['kind']
-        out.data['x'] = x.data['x']
-        out.data['u'] = x.data['u']
-
-
-    def fill_unity_like (self, x, out):
-        out.domain = Domain.nonnegative
-        m = (x.data['kind'] != Kind.undef)
-        out.data['kind'][m] = Kind.msmt
-        out.data['x'][m] = 1
-        out.data['u'][m] = 0
-        m = ~m
-        out.data['kind'][m] = Kind.undef
-        out.data['x'][m] = np.nan
-        out.data['u'][m] = np.nan
 
 
     # The actual core math functions
