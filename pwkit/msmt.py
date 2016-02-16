@@ -177,7 +177,7 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, MathlibDelegatingObject))
     """A an array of measurements that may be uncertain or limits.
 
     """
-    __slots__ = ('domain', 'data', '_scalar')
+    __slots__ = ('domain', 'data', '_zerod')
 
     @classmethod
     def from_other (cls, v, copy=True, domain=None):
@@ -191,8 +191,8 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, MathlibDelegatingObject))
         """
         rv = cls (domain, None, _noalloc=True)
         rv.data = data
-        rv._scalar = (rv.data.shape == ())
-        if rv._scalar:
+        rv._zerod = (rv.data.shape == ())
+        if rv._zerod:
             rv.data = np.atleast_1d (rv.data)
         return rv
 
@@ -206,24 +206,24 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, MathlibDelegatingObject))
 
     @property
     def shape (self):
-        if self._scalar:
+        if self._zerod:
             return ()
         return self.data.shape
 
     @property
     def ndim (self):
-        if self._scalar:
-            return 1
+        if self._zerod:
+            return 0
         return self.data.ndim
 
     @property
     def size (self):
-        if self._scalar:
+        if self._zerod:
             return 1
         return self.data.size
 
     def __len__ (self):
-        if self._scalar:
+        if self._zerod:
             raise TypeError ('len() of unsized object')
         return self.data.shape[0]
 
@@ -252,12 +252,12 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, MathlibDelegatingObject))
     # Indexing
 
     def __getitem__ (self, index):
-        if self._scalar:
+        if self._zerod:
             raise IndexError ('invalid index to scalar variable')
         return self.__class__._from_data (self.domain, self.data[index])
 
     def __setitem__ (self, index, value):
-        if self._scalar:
+        if self._zerod:
             raise TypeError ('object does not support item assignment')
         value = self.__class__.from_other (value, copy=False)
         self.domain = Domain.union[_ordpair (self.domain, value.domain)]
@@ -281,7 +281,7 @@ class MeasurementABC (six.with_metaclass (abc.ABCMeta, MathlibDelegatingObject))
 
 
     def __unicode__ (self):
-        if self._scalar:
+        if self._zerod:
             datum = self._str_one (self.data[0])
             return datum + ' (%s %s scalar)' % (Domain.names[self.domain],
                                                 self.__class__.__name__)
@@ -502,16 +502,16 @@ class Sampled (MeasurementABC):
         self.domain = Domain.normalize (domain)
 
         if _noalloc:
-            return # caller's responsibility to set `data` and `_scalar`
+            return # caller's responsibility to set `data` and `_zerod`
 
         # You can't index scalar values which makes it really annoying to
         # implement a lot of our math. So we store scalars as shape (1,) and
         # fake the outer parts.
 
         self.data = np.empty (shape, dtype=get_sampled_dtype (dtype))
-        self._scalar = (self.data.shape == ())
+        self._zerod = (self.data.shape == ())
 
-        if self._scalar:
+        if self._zerod:
             self.data = np.atleast_1d (self.data)
 
         if _noinit:
@@ -639,7 +639,7 @@ class SampledFunctionLibrary (MeasurementFunctionLibrary):
         data = np.atleast_1d (x.data)
         rv = Sampled (x.domain, data.shape, _noalloc=True)
         rv.data = data
-        rv._scalar = False
+        rv._zerod = False
         return rv
 
 
@@ -785,16 +785,16 @@ class Approximate (MeasurementABC):
         self.domain = Domain.normalize (domain)
 
         if _noalloc:
-            return # caller's responsibility to set `data` and `_scalar`
+            return # caller's responsibility to set `data` and `_zerod`
 
         # You can't index scalar values which makes it really annoying to
         # implement a lot of our math. So we store scalars as shape (1,) and
         # fake the outer parts.
 
         self.data = np.empty (shape, dtype=get_approximate_dtype (dtype))
-        self._scalar = (self.data.shape == ())
+        self._zerod = (self.data.shape == ())
 
-        if self._scalar:
+        if self._zerod:
             self.data = np.atleast_1d (self.data)
 
         if _noinit:
@@ -896,7 +896,7 @@ class Approximate (MeasurementABC):
             # the strict definition.
             rv[self.data['kind'] == Kind.lower] = True
 
-        if self._scalar:
+        if self._zerod:
             rv = rv[0]
         return rv
 
@@ -912,7 +912,7 @@ class Approximate (MeasurementABC):
         if other < 0 and self.domain == Domain.nonnegative:
             rv[self.data['kind'] == Kind.upper] = True
 
-        if self._scalar:
+        if self._zerod:
             rv = rv[0]
         return rv
 
@@ -1017,7 +1017,7 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
         data = np.atleast_1d (x.data)
         rv = Approximate (x.domain, data.shape, _noalloc=True)
         rv.data = data
-        rv._scalar = False
+        rv._zerod = False
         return rv
 
 
