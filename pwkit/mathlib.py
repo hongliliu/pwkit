@@ -413,10 +413,12 @@ class NumpyFunctionLibrary (MathFunctionLibrary):
         return np.asarray (x).reshape (s)
 
     # The implementations for the bulk of the Common Interface functions,
-    # which just delegate to Numpy, are added in below.
+    # which just delegate to Numpy, are added in to the singleton instance
+    # below.
 
+numpy_library = NumpyFunctionLibrary ()
 
-def _fill_numpy_library_type ():
+def _fill_numpy_library_instance ():
     """We allow the Numpy implementations to not be available to keep compatiblity
     with older versions of Numpy, since the list of provided ufuncs has grown
     with time.
@@ -428,10 +430,9 @@ def _fill_numpy_library_type ():
 
         impl = getattr (np, fs.name, None)
         if impl is not None:
-            setattr (NumpyFunctionLibrary, fs.name, impl)
+            setattr (numpy_library, fs.name, impl)
 
-_fill_numpy_library_type ()
-numpy_library = NumpyFunctionLibrary ()
+_fill_numpy_library_instance ()
 
 
 

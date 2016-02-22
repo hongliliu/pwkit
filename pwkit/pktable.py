@@ -1031,6 +1031,63 @@ class MeasurementColumn (PKTableColumnABC, MathlibDelegatingObject):
 
 
 
+class StringColumn (PKTableColumnABC):
+    _data = None
+    "The actual string data."
+
+    def __init__ (self, len, _data=None):
+        if _data is not None:
+            self._data = _data
+            return
+
+        try:
+            len = int (len)
+        except Exception:
+            raise ValueError ('StringColumn length must be an integer')
+
+        self._data = np.empty (len, dtype=np.object)
+        self._data.fill ('')
+
+
+    @classmethod
+    def new_from_values (cls, values):
+        values = list (values)
+        rv = cls (len (values))
+
+        for idx, v in enumerate (values):
+            if not isinstance (v, six.text_type):
+                raise ValueError ('value must be %s; got %r' % (six.text_type, v))
+            rv._data[idx] = v
+
+        return rv
+
+
+    # Indexing.
+
+    def __len__ (self):
+        return len (self._data)
+
+    def __iter__ (self):
+        return iter (self._data)
+
+    def _get_index (self, idx):
+        return self._data[idx]
+
+    def _set_index (self, idx, value):
+        if not isinstance (value, six.text_type):
+            raise ValueError ('value must be %s; got %r' % (six.text_type, value))
+        self._data[idx] = value
+
+    def __getitem__ (self, key):
+        return self._data[key]
+
+    def __setitem__ (self, key, value):
+        # XXX type checking
+        self._data[key] = value
+
+
+
+
 class CoordColumn (PKTableColumnABC):
     """astropy.coordinates.SkyCoord instances are not mutable, so we don't use
     them for our data storage. However, we should ideally support different
