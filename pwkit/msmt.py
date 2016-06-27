@@ -176,6 +176,14 @@ class Kind (object):
 class MeasurementABC (six.with_metaclass (abc.ABCMeta, MathlibDelegatingObject)):
     """A an array of measurements that may be uncertain or limits.
 
+    As a subtlety, unlike Numpy we do not distinguish between zero-dimensional
+    arrays (``shape = ()``) and scalars. In Numpy they are almost
+    interchangeable, but are not identical.
+
+    The implementation then uses arrays of shape ``(1,)`` to represent
+    zero-dimensional arrays, maintaining a special flag to distinguish between
+    those and arrays that truly have shape ``(1,)``.
+
     """
     __slots__ = ('domain', 'data', '_zerod')
 
@@ -319,12 +327,18 @@ class MeasurementFunctionLibrary (TidiedFunctionLibrary):
     def fill_from_broadcasted (self, x, out):
         """Fill *out* with the values from *x*, broadcasting as appropriate.
 
+        This function is needed for the generic implementation of integer
+        exponentiation.
+
         """
         raise NotImplementedError ()
 
     def fill_unity_like (self, x, out):
         """Fill *out* with ones, matching the (broadcasted) masking state of *x* if
         applicable.
+
+        This function is needed for the generic implementation of
+        exponentiation to the zeroth power.
 
         """
         raise NotImplementedError ()

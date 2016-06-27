@@ -525,8 +525,8 @@ Individual function reference for the Common Interface
 
    Return a *read-write view* of *x* having new shape *shape*. The total
    number of elements in the array must be the same, but the shape changes.
-   Zero-dimensional arrays may be interconverted with other array shapes, so
-   long as they have just one element.
+   Zero-dimensional arrays and scalars may be interconverted with other array
+   shapes, so long as they have just one element.
 
 .. function:: right_shift(x, y, out=None)
 
