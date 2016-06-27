@@ -83,3 +83,29 @@ def test_numpy_int_core_math ():
     out = np.zeros ((4,), dtype=np.int)
     nt.assert_raises (TypeError, lambda: np.exp (a, out))
     nt.assert_raises (TypeError, lambda: ml.exp (a, out))
+
+
+def _try_different_flavors (base_array):
+    yield base_array
+
+    from pwkit.msmt import Approximate, Sampled
+    yield Sampled.from_other (base_array)
+    yield Approximate.from_other (base_array)
+
+    from pwkit.pktable import ScalarColumn, MeasurementColumn
+    yield ScalarColumn.new_from_data (base_array)
+    yield MeasurementColumn.new_from_data (base_array)
+
+
+def test_absolute ():
+    a = np.array ([0, -1, 1])
+    t = np.abs (a)
+
+    for f in _try_different_flavors (a):
+        nt.assert_array_equal (ml.abs (a), t)
+
+    a = np.array ([0., -0., np.nan, np.inf, -np.inf, -5, 5.])
+    t = np.abs (a)
+
+    for f in _try_different_flavors (a):
+        nt.assert_array_equal (ml.abs (a), t)
