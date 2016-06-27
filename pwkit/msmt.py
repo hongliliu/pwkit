@@ -35,8 +35,8 @@ import numpy as np
 
 from . import PKError, unicode_to_str
 from .simpleenum import enumeration
-from .numutil import broadcastize, try_asarray
-from .mathlib import TidiedFunctionLibrary, MathlibDelegatingObject, numpy_types
+from .numutil import broadcastize
+from .mathlib import TidiedFunctionLibrary, MathlibDelegatingObject, numpy_types, try_asarray
 
 
 
@@ -519,8 +519,6 @@ class Sampled (MeasurementABC):
         # given the data we have.
 
         a = try_asarray (v)
-        if a is None:
-            raise ValueError ('do not know how to handle operand %r' % v)
 
         if domain is None:
             if np.all (a >= 0):
@@ -671,8 +669,6 @@ class SampledFunctionLibrary (MeasurementFunctionLibrary):
         # given the data we have.
 
         a = try_asarray (x)
-        if a is None:
-            raise ValueError ('do not know how to handle operand %r' % x)
 
         if np.all (a >= 0):
             domain = Domain.nonnegative
@@ -827,8 +823,6 @@ class Approximate (MeasurementABC):
         # given the data we have.
 
         a = try_asarray (v)
-        if a is None:
-            raise ValueError ('do not know how to handle operand %r' % v)
 
         if domain is None:
             if np.all (a >= 0):
@@ -1070,8 +1064,6 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
         # given the data we have.
 
         a = try_asarray (x)
-        if a is None:
-            raise ValueError ('do not know how to handle operand %r' % x)
 
         if np.all (a >= 0):
             domain = Domain.nonnegative
@@ -1193,8 +1185,7 @@ def try_as_measurement (thing):
     if isinstance (thing, MeasurementABC):
         return thing
 
-    from numutil import try_asarray
-    a = try_asarray (thing)
+    a = try_asarray (thing, fail_mode='none')
     if a is not None:
         return Approximate.from_other (a)
 

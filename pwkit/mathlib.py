@@ -79,8 +79,25 @@ def broadcast_shapes (*shapes):
 
 
 def try_asarray (thing, fail_mode='raise'):
-    # NOTE: this function is duplicates the one in numutil. I might want to
-    # make numutil depend on mathlib some day.
+    """Try to convert *thing* to a :class:`numpy.ndarray`.
+
+    Unlike :func:`numpy.asarray`, this will only accept things that appear to
+    contain numerical values. If *thing* appears not to be numerical, the
+    behavior depends on *fail_mode*. If it is the string ``"raise"`` (the
+    default), :exc:`ValueError` will be raised. If it is ``"none"``, ``None``
+    will be returned. Otherwise an :exc:`Exception` will be raised complaining
+    about the value given for *fail_mode*.
+
+    In particular, we call :func:`~numpy.asarray` and examine the
+    :attr:`numpy.dtype.kind` of the returned array. If it is not boolean
+    (``b``), integer (``i``), floating-point (``f``), or complex (``c``), we
+    consider the array not to be numerical.
+
+    The context is that :func:`~numpy.asarray` will accept literally anything
+    as an argument. If given a random Python object, it will return a scalar
+    or array of dtype ``Object``, which is often not helpful.
+
+    """
     thing = np.asarray (thing)
     if thing.dtype.kind in 'bifc':
         return thing
@@ -302,7 +319,8 @@ class MathFunctionLibrary (object):
         not need to painstakingly special-case whether each argument is a
         Python scalar, a Numpy array, etc. Because this function is used for
         output arguments, if at all possible it should be the case that
-        modifications to the the returned object propagate back to *thing*.
+        modifications to the the returned object propagate back to *thing*. If
+        *thing* cannot sanely be converted, a `ValueError` is raised.
 
         """
         return thing

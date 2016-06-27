@@ -327,17 +327,10 @@ class _PKTableColumnsHelper (object):
                 arrayish_factory = MeasurementColumn.new_from_data
                 arrayish_data = sval
 
-            # Nothing specific worked. Last-ditch effort: np.asarray(). This
-            # function will accept literally any argument, which is a bit
-            # much, so we're a bit pickier and only take
-            # bool/int/float/complex values. (Generically, it will give you an
-            # array of shape () and dtype Object.) We're willing to work with
-            # arrays of shape (), (n,), and (1,n), if they agree with nrows,
-            # when it's known.
+            # Nothing specific worked. Last-ditch effort: try_asarray().
 
             if arrayish_factory is None:
-                from .numutil import try_asarray
-                arrayish_data = try_asarray (sval)
+                arrayish_data = try_asarray (sval, fail_mode='none')
                 if arrayish_data is None:
                     raise ValueError ('unhandled PKTable column value %r for %r' % (sval, skey))
                 arrayish_factory = ScalarColumn.new_from_data
@@ -812,10 +805,7 @@ class ScalarColumn (PKTableColumnABC, MathlibDelegatingObject):
 
     @classmethod
     def new_from_data (cls, data, copy=True):
-        from .numutil import try_asarray
         a = try_asarray (data)
-        if a is None:
-            raise ValueError ('cannot convert data %r to a Numpy array' % data)
         if a.ndim != 1:
             raise ValueError ('input data array must be one-dimensional; got %r' % data)
 
