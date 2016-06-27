@@ -443,8 +443,9 @@ class MeasurementFunctionLibrary (TidiedFunctionLibrary):
 
 
     def tidy_subtract (self, x, y, out):
-        # We have to allocate a temporary in case `x is out`. Or you know we could
-        # just implement the function.
+        # We have to allocate a temporary in case `x is out` (see
+        # test_mathlib:test_subtract). Or you know we could just implement the
+        # function.
         temp = self.new_empty (y.shape, y.dtype)
         self.negative (y, temp)
         self.add (x, temp, out)
@@ -467,7 +468,6 @@ class MeasurementFunctionLibrary (TidiedFunctionLibrary):
 # of samples that are then processed vectorially. It's absurdly
 # memory-inefficient, but works, unlike analytic error propagation, which
 # fails in many real applications.
-
 sampled_n_samples = 1024 - 1 # each Sampled takes 1024*itemsize bytes
 
 class SampledDtypeGenerator (object):
@@ -759,6 +759,19 @@ class SampledFunctionLibrary (MeasurementFunctionLibrary):
         # np.reciprocal() truncates integers, which we don't want
         np.divide (1, x.data['samples'], out.data['samples'])
         return out
+
+
+    def repvals (self, x, method='median', limitsok=False):
+        if not limitsok and np.any ((x.data['kind'] == Kind.lower) | (x.data['kind'] == Kind.upper)):
+            raise ValueError ('cannot call repvals() on measurement array containing '
+                              'limits without limitsok=True')
+
+        if method == 'median':
+            return np.median (x.data['samples'], axis=-1)
+        if method == 'median':
+            return np.mean (x.data['samples'], axis=-1)
+
+        raise ValueError ('unknown repvals method %r' % (method,))
 
 
 sampled_function_library = SampledFunctionLibrary ()
@@ -1180,13 +1193,12 @@ class ApproximateFunctionLibrary (MeasurementFunctionLibrary):
         return out
 
 
-    def tidy_repvals (self, x, out, method=None, limitsok=False):
+    def repvals (self, x, method=None, limitsok=False):
         if not limitsok and np.any ((x.data['kind'] == Kind.lower) | (x.data['kind'] == Kind.upper)):
             raise ValueError ('cannot call repvals() on measurement array containing '
                               'limits without limitsok=True')
 
-        out[:] = x.data['x']
-        return out
+        return x.data['x'].copy ()
 
 
 approximate_function_library = ApproximateFunctionLibrary ()

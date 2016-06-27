@@ -253,7 +253,7 @@ common_interface_functions = dict ((s.name, s) for s in [
     FS ('rad2deg',       s.std_unary,   f.has_numpy_impl),
     FS ('reciprocal',    s.std_unary,   f.has_numpy_impl),
     FS ('remainder',     s.std_binary,  f.has_numpy_impl),
-    FS ('repvals',       s.std_unary,   f.none),
+    FS ('repvals',       s.other_1,     f.none),
     FS ('reshape',       s.other_1,     f.none),
     FS ('right_shift',   s.std_binary,  f.has_numpy_impl | f.ints_only),
     FS ('rint',          s.std_unary,   f.has_numpy_impl),
