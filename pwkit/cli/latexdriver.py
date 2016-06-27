@@ -156,17 +156,14 @@ def merge_bibtex_with_aux (auxpath, mainpath, extradir, parse=get_bibtex_dict, a
 
     merged = merge_bibtex_collections (citednames, maindict, gen_extra_dicts (),
                                        allow_missing=allow_missing)
-    newpath = mainpath.with_suffix ('.bib.new')
 
-    with newpath.open ('wt') as newbib:
+    with mainpath.make_tempfile (want='handle', resolution='overwrite') as newbib:
         write_bibtex_dict (newbib, six.viewvalues (merged))
-
-    newpath.rename (mainpath)
 
 
 # This batch of code implements the filename-recorder-to-Makefile magic.
 
-def convert_fls_to_makefile (flspath, finalpath, prefix, work, mfpath):
+def convert_fls_to_makefile (flspath, finalpath, prefix, replacement, work, mfpath):
     texpwd = None
 
     with flspath.open ('rt') as fls, mfpath.open ('wt') as mf:
@@ -195,6 +192,9 @@ def convert_fls_to_makefile (flspath, finalpath, prefix, work, mfpath):
             if prefix is not None:
                 if r_full.startswith (r_prefix):
                     r_full = r_full[len (r_prefix) + 1:]
+
+                    if replacement is not None:
+                        r_full = replacement + r_full
                 else:
                     warn ('unexpected dependent file path %r' % r_full)
                     continue
@@ -207,20 +207,22 @@ def convert_fls_to_makefile (flspath, finalpath, prefix, work, mfpath):
 
 # The actual command-line program
 
-usage = """latexdriver [-lxbBRq] [-eSTYLE] [-ESTYLE] [-MPREFIX,DEST] input.tex output.pdf
+usage = """latexdriver [-lAxbBRq] [-eSTYLE] [-ESTYLE] [-M<args>] input.tex output.pdf
 
 Drive (xe)latex sensibly. Create output.pdf from input.tex, rerunning as
 necessary, silencing chatter, and hiding intermediate files in the directory
 .latexwork/.
 
 -l      - Add "-papersize letter" argument.
+-A      - Add "-papersize A4" argument.
 -x      - Use xetex.
 -b      - Use bibtex.
 -B      - Use bibtex with auto-merging and homogenization; requires `bibtexparser`.
 -eSTYLE - Use 'bib' tool with bibtex style STYLE.
 -ESTYLE - Optionally use the 'bib' tool in conjunction with '-B' option.
--MPREFIX,DEST  - Use '-recorder' option to output Makefile-format dependency info
-          to DEST, stripping prefix PREFIX.
+-MPREFIX[,REPLACEMENT],DEST  - Use '-recorder' option to output Makefile-format
+          dependency info to DEST, stripping prefix PREFIX, optionally replacing it
+          with REPLACEMENT.
 -R      - Be reckless and ignore errors from tools.
 -q      - Be quiet and avoid printing anything on success.
 
@@ -276,8 +278,12 @@ def logrun (command, boring_args, interesting_arg, logpath, quiet=False, reckles
         raise
 
 
-def bib_export (style, auxpath, bibpath, no_tool_ok=False, quiet=False):
-    args = ['bib', 'btexport', style, str(auxpath)]
+def bib_export (style, auxpath, bibpath, no_tool_ok=False, quiet=False, ignore_missing=False):
+    args = ['bib', 'btexport']
+    if ignore_missing:
+        args += ['-i']
+    args += [style, str(auxpath)]
+
     if not quiet:
         print ('+', ' '.join (args), '>' + str(bibpath))
 
@@ -314,6 +320,7 @@ def commandline (argv=None):
 
     bib_style = None
     makefile_prefix = None
+    makefile_replacement = None
     makefile_dest = None
     engine_args = default_args
     engine = 'pdflatex'
@@ -324,6 +331,7 @@ def commandline (argv=None):
     do_smart_bibtex = pop_option ('B', argv)
     do_xetex = pop_option ('x', argv)
     do_letterpaper = pop_option ('l', argv)
+    do_a4paper = pop_option ('A', argv)
     do_reckless = pop_option ('R', argv)
     quiet = pop_option ('q', argv)
     do_smart_bibtools = False
@@ -337,12 +345,21 @@ def commandline (argv=None):
 
     for i in range (1, len (argv)):
         if argv[i].startswith ('-M'):
-            makefile_prefix, makefile_dest = argv[i][2:].split (',', 1)
+            pieces = argv[i][2:].split (',', 2)
+            if len (pieces) == 2:
+                makefile_prefix, makefile_dest = pieces
+            elif len (pieces) == 3:
+                makefile_prefix, makefile_replacement, makefile_dest = pieces
+            else:
+                wrong_usage (usage, 'could not parse -M argument')
             del argv[i]
             break
 
     if len (argv) != 3:
         wrong_usage (usage, 'expect exactly 2 non-option arguments')
+
+    if do_letterpaper and do_a4paper:
+        wrong_usage (usage, 'only one of "-l" and "-A" may be specified')
 
     input = Path (argv[1])
     output = Path (argv[2])
@@ -355,6 +372,8 @@ def commandline (argv=None):
         engine = 'xelatex'
     if do_letterpaper:
         engine_args += ['-papersize', 'letter']
+    if do_letterpaper:
+        engine_args += ['-papersize', 'A4']
     if makefile_dest is not None:
         engine_args += ['-recorder']
 
@@ -373,7 +392,7 @@ def commandline (argv=None):
     workdir = input.with_name ('.latexwork')
     workalias = input.with_name ('_latexwork')
 
-    (workdir / 'foo').ensure_parent (parents=True)
+    workdir.ensure_dir (parents=True)
     workalias.rellink_to (workdir, force=True)
 
     job = workalias / base
@@ -392,9 +411,9 @@ def commandline (argv=None):
                 extradir = input.with_name ('.bibtex')
 
                 if bib_style is not None:
-                    (extradir / 'foo').ensure_parent (parents=True)
+                    extradir.ensure_dir (parents=True)
                     bib_export (bib_style, aux, extradir / 'ZZ_bibtools.bib',
-                                no_tool_ok=True, quiet=quiet)
+                                no_tool_ok=True, quiet=quiet, ignore_missing=True)
 
                 if not quiet:
                     print ('+', '(generate and normalize)', bib)
@@ -439,6 +458,7 @@ def commandline (argv=None):
         if makefile_dest is not None:
             convert_fls_to_makefile (job.with_suffix ('.fls'), output,
                                      Path (makefile_prefix),
+                                     makefile_replacement,
                                      workalias,
                                      Path (makefile_dest))
     finally:

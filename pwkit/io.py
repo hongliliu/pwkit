@@ -1,5 +1,5 @@
 # -*- mode: python; coding: utf-8 -*-
-# Copyright 2012-2015 Peter Williams <peter@newton.cx> and collaborators.
+# Copyright 2012-2016 Peter Williams <peter@newton.cx> and collaborators.
 # Licensed under the MIT License.
 
 """The ``pwkit`` package provides many tools to ease reading and writing data
@@ -18,6 +18,7 @@ __all__ = str ('''djoin ensure_dir ensure_symlink make_path_func rellink
                   pathlines pathwords try_open words Path''').split ()
 
 import io, os, pathlib
+import six
 
 from . import PKError, text_type
 
@@ -270,6 +271,16 @@ class Path (_ParentPath):
 
 
     # Filesystem interrogation
+
+    def readlink (self):
+        """Assuming that this path is a symbolic link, read its contents and
+        return them as another :class:`Path` object. An "invalid argument"
+        OSError will be raised if this path does not point to a symbolic link.
+
+        """
+        from . import binary_type
+        return self.__class__ (os.readlink (binary_type (self)))
+
 
     def scandir (self):
         """Iteratively scan this path, assuming it’s a directory. This requires and
@@ -551,19 +562,32 @@ class Path (_ParentPath):
         return self.symlink_to (target.make_relative (self.parent))
 
 
-    def rmtree (self):
-        """Recursively delete this directory and its contents. If any errors are
-        encountered, they will be printed to standard error.
+    def rmtree (self, errors='warn'):
+        """Recursively delete this directory and its contents. The *errors* keyword
+        specifies how errors are handled:
+
+        "warn" (the default)
+          Print a warning to standard error.
+        "ignore"
+          Ignore errors.
 
         """
         import shutil
-        from pwkit.cli import warn
 
-        def on_error (func, path, exc_info):
-            warn ('couldn\'t rmtree %s: in %s of %s: %s', self, func.__name__,
-                  path, exc_info[1])
+        if errors == 'ignore':
+            ignore_errors = True
+            onerror = None
+        elif errors == 'warn':
+            ignore_errors = False
+            from .cli import warn
 
-        shutil.rmtree (text_type (self), ignore_errors=False, onerror=on_error)
+            def onerror (func, path, exc_info):
+                warn ('couldn\'t rmtree %s: in %s of %s: %s', self, func.__name__,
+                      path, exc_info[1])
+        else:
+            raise ValueError ('unexpected "errors" keyword %r' % (errors,))
+
+        shutil.rmtree (text_type (self), ignore_errors=ignore_errors, onerror=onerror)
         return self
 
 
@@ -611,6 +635,29 @@ class Path (_ParentPath):
         """
         from pandas import HDFStore
         return HDFStore (text_type (self), mode=mode, **kwargs)
+
+
+    def read_astropy_ascii (self, **kwargs):
+        """Open as an ASCII table, returning a :class:`astropy.table.Table` object.
+        Keyword arguments are passed to :func:`astropy.io.ascii.open`; valid
+        ones likely include:
+
+        - ``names = <list>`` (column names)
+        - ``format`` ('basic', 'cds', 'csv', 'ipac', ...)
+        - ``guess = True`` (guess table format)
+        - ``delimiter`` (column delimiter)
+        - ``comment = <regex>``
+        - ``header_start = <int>`` (line number of header, ignoring blank and comment lines)
+        - ``data_start = <int>``
+        - ``data_end = <int>``
+        - ``converters = <dict>``
+        - ``include_names = <list>`` (names of columns to include)
+        - ``exclude_names = <list>`` (names of columns to exclude; applied after include)
+        - ``fill_values = <dict>`` (filler values)
+
+        """
+        from astropy.io import ascii
+        return ascii.read (text_type (self), **kwargs)
 
 
     def read_fits (self, **kwargs):
@@ -690,6 +737,18 @@ class Path (_ParentPath):
                 raise
 
 
+    def read_json (self, mode='rt', **kwargs):
+        """Use the :mod:`json` module to read in this file as a JSON-formatted data
+        structure. Keyword arguments are passed to :func:`json.load`. Returns the
+        read-in data structure.
+
+        """
+        import json
+
+        with self.open (mode=mode) as f:
+            return json.load (f, **kwargs)
+
+
     def read_lines (self, mode='rt', noexistok=False, **kwargs):
         """Generate a sequence of lines from the file pointed to by this path, by
         opening as a regular file and iterating over it. The lines therefore
@@ -707,12 +766,39 @@ class Path (_ParentPath):
                 raise
 
 
-    def read_numpy_text (self, **kwargs):
+    def read_numpy (self, **kwargs):
+        """Read this path into a :class:`numpy.ndarray` using :func:`numpy.load`.
+        *kwargs* are passed to :func:`numpy.load`; they likely are:
+
+	mmap_mode : None, 'r+', 'r', 'w+', 'c'
+          Load the array using memory-mapping
+	allow_pickle : bool = True
+          Whether Pickle-format data are allowed; potential security hazard.
+	fix_imports : bool = True
+	  Try to fix Python 2->3 import renames when loading Pickle-format data.
+	encoding : 'ASCII', 'latin1', 'bytes'
+	  The encoding to use when reading Python 2 strings in Pickle-format data.
+
+        """
+        import numpy as np
+        with self.open ('rb') as f:
+            return np.load (f, **kwargs)
+
+
+    def read_numpy_text (self, dfcols=None, **kwargs):
         """Read this path into a :class:`numpy.ndarray` as a text file using
         :func:`numpy.loadtxt`. In normal conditions the returned array is
         two-dimensional, with the first axis spanning the rows in the file and
-        the second axis columns (but see the *unpack* keyword). *kwargs* are
-        passed to :func:`numpy.loadtxt`; they likely are:
+        the second axis columns (but see the *unpack* and *dfcols* keywords).
+
+        If *dfcols* is not None, the return value is a
+        :class:`pandas.DataFrame` constructed from the array. *dfcols* should
+        be an iterable of column names, one for each of the columns returned
+        by the :func:`numpy.loadtxt` call. For convenience, if *dfcols* is a
+        single string, it will by turned into an iterable by a call to
+        :func:`str.split`.
+
+        The remaining *kwargs* are passed to :func:`numpy.loadtxt`; they likely are:
 
 	dtype : data type
 	  The data type of the resulting array.
@@ -735,7 +821,19 @@ class Path (_ParentPath):
 
         """
         import numpy as np
-        return np.loadtxt (text_type (self), **kwargs)
+
+        if dfcols is not None:
+            kwargs['unpack'] = True
+
+        retval = np.loadtxt (text_type (self), **kwargs)
+
+        if dfcols is not None:
+            import pandas as pd
+            if isinstance (dfcols, six.string_types):
+                dfcols = dfcols.split ()
+            retval = pd.DataFrame (dict (zip (dfcols, retval)))
+
+        return retval
 
 
     def read_pandas (self, format='table', **kwargs):

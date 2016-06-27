@@ -35,7 +35,9 @@ clearcal clearcal_cli
 concat concat_cli
 delcal delcal_cli
 delmod_cli
+dftdynspec_cli
 dftphotom_cli
+dftspect_cli
 extractbpflags extractbpflags_cli
 flagmanager_cli
 flaglist flaglist_cli FlaglistConfig
@@ -45,14 +47,18 @@ ft ft_cli FtConfig
 gaincal gaincal_cli GaincalConfig
 gencal gencal_cli GencalConfig
 getopacities getopacities_cli
+gpdetrend gpdetrend_cli GpdetrendConfig
+gpdiagnostics_cli
 gpplot gpplot_cli GpplotConfig
 image2fits image2fits_cli
 importevla importevla_cli
 listobs listobs_cli
 mfsclean mfsclean_cli MfscleanConfig
+mjd2date_cli
 mstransform mstransform_cli MstransformConfig
 plotants plotants_cli
 plotcal plotcal_cli PlotcalConfig
+polmodel_cli
 setjy setjy_cli SetjyConfig
 split split_cli SplitConfig
 spwglue_cli
@@ -660,6 +666,15 @@ def delmod_cli (argv, alter_logger=True):
         cb.close ()
 
 
+# dftdynspec
+#
+# Shim for a separate module
+
+def dftdynspec_cli (argv):
+    from .dftdynspec import dftdynspec_cli
+    dftdynspec_cli (argv)
+
+
 # dftphotom
 #
 # Shim for a separate module
@@ -667,6 +682,15 @@ def delmod_cli (argv, alter_logger=True):
 def dftphotom_cli (argv):
     from .dftphotom import dftphotom_cli
     dftphotom_cli (argv)
+
+
+# dftspect
+#
+# Shim for a separate module
+
+def dftspect_cli (argv):
+    from .dftspect import dftspect_cli
+    dftspect_cli (argv)
 
 
 # extractbpflags
@@ -1463,6 +1487,108 @@ def getopacities_cli (argv):
     print ('opacity = [%s]' % (', '.join ('%.5f' % q for q in opac)))
 
 
+# gpdetrend
+
+gpdetrend_doc = \
+"""
+casatask gpdetrend caltable=
+
+Remove long-term phase trends from a complex-gain calibration table. For each
+antenna/spw/pol, the complex gains are divided into separate chunks (e.g., the
+intention is for one chunk for each visit to the complex-gain calibrator). The
+mean phase within each chunk is divided out. The effect is to remove long-term
+phase trends from the calibration table, but preserve short-term ones.
+
+caltable=MS
+  The input calibration Measurement Set
+
+maxtimegap=int
+  Measured in minutes. Gaps between solutions of this duration or longer will
+  lead to a new segment being considered. Default is four times the smallest
+  time gap seen in the data set.
+""" + loglevel_doc
+
+
+class GpdetrendConfig (ParseKeywords):
+    caltable = Custom (str, required=True)
+    maxtimegap = int
+    loglevel = 'warn'
+
+
+def gpdetrend (cfg):
+    from ... import numutil
+
+    tb = util.tools.table ()
+
+    tb.open (binary_type (cfg.caltable), nomodify=False)
+    #fields = tb.getcol (b'FIELD_ID')
+    spws = tb.getcol (b'SPECTRAL_WINDOW_ID')
+    ants = tb.getcol (b'ANTENNA1')
+    vals = tb.getcol (b'CPARAM')
+    flags = tb.getcol (b'FLAG')
+    times = tb.getcol (b'TIME')
+
+    npol, unused, nsoln = vals.shape
+    assert unused == 1, 'unexpected gain table structure!'
+    vals = vals[:,0,:]
+    flags = flags[:,0,:]
+
+    # see what we've got
+
+    def seen_values (data):
+        return [idx for idx, count in enumerate (np.bincount (data)) if count]
+
+    any_ok = ~(np.all (flags, axis=0)) # mask for solns where at least one pol is unflagged
+    #seenfields = seen_values (fields[any_ok])
+    seenspws = seen_values (spws[any_ok])
+    seenants = seen_values (ants[any_ok])
+
+    # time gap?
+
+    if cfg.maxtimegap is not None:
+        maxtimegap = cfg.maxtimegap * 60 # min => seconds
+    else:
+        stimes = np.sort (times)
+        dt = np.diff (stimes)
+        dt = dt[dt > 0]
+        maxtimegap = 4 * dt.min ()
+
+    # Remove average phase of each chunk
+
+    for iant in seenants:
+        for ipol in range (npol):
+            filter = (ants == iant) & ~flags[ipol]
+
+            for ispw in seenspws:
+                # XXX: do something by field?
+                sfilter = filter & (spws == ispw)
+                t = times[sfilter]
+                if not t.size:
+                    continue
+
+                for s in numutil.slice_around_gaps (t, maxtimegap):
+                    w = np.where (sfilter)[0][s]
+                    meanph = np.angle (vals[ipol,w].mean ())
+                    vals[ipol,w] *= np.exp (-1j * meanph)
+
+    # Rewrite and we're done.
+
+    tb.putcol (b'CPARAM', vals.reshape ((npol, 1, nsoln)))
+    tb.close ()
+
+
+gpdetrend_cli = makekwcli (gpdetrend_doc, GpdetrendConfig, gpdetrend)
+
+
+# gpdiagnostics
+#
+# Shim for a separate module
+
+def gpdiagnostics_cli (argv):
+    from .gpdiagnostics import gpdiagnostics_cli
+    gpdiagnostics_cli (argv)
+
+
 # gpplot
 #
 # See bpplot() -- CASA plotcal can do this in a certain sense, but it's slow
@@ -1494,6 +1620,14 @@ dims=WIDTH,HEIGHT
 margins=TOP,RIGHT,LEFT,BOTTOM
   If saving to a file, the plot margins in the same units as the dims.
   The default is 4 on every side.
+
+maxtimegap=10
+  Solutions separated by more than this number of minutes will be drawn
+  with separate lines for clarity.
+
+mjdrange=START,STOP
+  If specified, gain solutions outside of the MJDs STOP and START will be
+  ignored.
 """ + loglevel_doc
 
 
@@ -1502,12 +1636,17 @@ class GpplotConfig (ParseKeywords):
     dest = str
     dims = [1000, 600]
     margins = [4, 4, 4, 4]
+    maxtimegap = 10. # minutes
+    mjdrange = [float]
     loglevel = 'warn'
 
 
 def gpplot (cfg):
     import omega as om, omega.render
     from ... import numutil
+
+    if len (cfg.mjdrange) not in (0, 2):
+        raise Exception ('"mjdrange" parameter must provide exactly 0 or 2 numbers')
 
     if isinstance (cfg.dest, omega.render.Pager):
         # This is for non-CLI invocation.
@@ -1541,6 +1680,13 @@ def gpplot (cfg):
     vals = vals[:,0,:]
     flags = flags[:,0,:]
 
+    # Apply date filter by futzing with flags
+
+    times /= 86400. # convert to MJD
+
+    if len (cfg.mjdrange):
+        flags |= (times < cfg.mjdrange[0]) | (times > cfg.mjdrange[1])
+
     # see what we've got
 
     def seen_values (data):
@@ -1553,8 +1699,11 @@ def gpplot (cfg):
 
     field_offsets = dict ((fieldid, idx) for idx, fieldid in enumerate (seenfields))
     spw_offsets = dict ((spwid, idx) for idx, spwid in enumerate (seenspws))
+    ant_offsets = dict ((antid, idx) for idx, antid in enumerate (seenants))
 
     # normalize phases to avoid distracting wraps
+
+    mean_amps = np.ones ((len (seenants), npol, len (seenspws)))
 
     for iant in seenants:
         for ipol in range (npol):
@@ -1567,10 +1716,11 @@ def gpplot (cfg):
 
                 meanph = np.angle (vals[ipol,sfilter].mean ())
                 vals[ipol,sfilter] *= np.exp (-1j * meanph)
+                meanam = np.abs (vals[ipol,sfilter]).mean ()
+                mean_amps[ant_offsets[iant],ipol,spw_offsets[ispw]] = meanam
 
     # find plot limits
 
-    times /= 86400. # convert to MJD
     min_time = times[any_ok].min ()
     max_time = times[any_ok].max ()
     mjdref = int (np.floor (min_time))
@@ -1599,7 +1749,7 @@ def gpplot (cfg):
         min_ph = -180
 
     polnames = 'RL' # XXX: identification doesn't seem to be stored in cal table
-    maxtimegap = 10. / 1440 # 10 minutes, in units of days
+    maxtimegap = cfg.maxtimegap / 1440 # => units of days
 
     for iant in seenants:
         for ipol in range (npol):
@@ -1630,10 +1780,16 @@ def gpplot (cfg):
                     p_am.addXY (tsub, asub, kt, lines=lines, dsn=spw_offsets[ispw])
                     p_ph.addXY (tsub, psub, None, lines=lines, dsn=spw_offsets[ispw])
                     anyseen = True
+
+                    if kt is not None: # hack for per-spw "anyseen"-type checking
+                        p_am.addHLine (mean_amps[ant_offsets[iant],ipol,spw_offsets[ispw]], None,
+                                       zheight=-1, lineStyle={'color': 'faint'})
                     kt = None
 
             if not anyseen:
                 continue
+
+            p_ph.addHLine (0, None, zheight=-1, lineStyle={'color': 'faint'})
 
             p_am.setBounds (xmin=min_time,
                             xmax=max_time,
@@ -1660,7 +1816,7 @@ gpplot_cli = makekwcli (gpplot_doc, GpplotConfig, gpplot)
 # image2fits
 #
 # This is basically the "exportfits" task with fewer options and a slightly
-# clearer name (which is also consistent with the pwimage2fits script).
+# clearer name.
 
 image2fits_doc = \
 """
@@ -1669,12 +1825,14 @@ casatask image2fits <input MS image> <output FITS image>
 Convert an image in MS format to FITS format.
 """
 
-def image2fits (mspath, fitspath):
+def image2fits (mspath, fitspath, velocity=False, optical=False, bitpix=-32,
+                minpix=0, maxpix=-1, overwrite=False, dropstokes=False, stokeslast=True,
+                history=True, **kwargs):
     ia = util.tools.image ()
     ia.open (b(mspath))
-    ia.tofits (outfile=b(fitspath), velocity=False, optical=False, bitpix=-32,
-               minpix=0, maxpix=-1, overwrite=False, dropstokes=False,
-               stokeslast=True, history=True)
+    ia.tofits (outfile=b(fitspath), velocity=velocity, optical=optical, bitpix=bitpix,
+               minpix=minpix, maxpix=maxpix, overwrite=overwrite, dropstokes=dropstokes,
+               stokeslast=stokeslast, history=history, **kwargs)
     ia.close ()
 
 
@@ -2065,6 +2223,33 @@ def mfsclean (cfg):
 mfsclean_cli = makekwcli (mfsclean_doc, MfscleanConfig, mfsclean)
 
 
+# mjd2date
+
+mjd2date_doc = \
+"""
+casatask mjd2date <date>
+
+Convert an MJD to a date in the format used by CASA.
+
+"""
+def mjd2date (mjd, precision=3):
+    from astropy.time import Time
+    dt = Time (mjd, format='mjd', scale='utc').to_datetime ()
+    fracsec = ('%.*f' % (precision, 1e-6 * dt.microsecond)).split ('.')[1]
+    return '%04d/%02d/%02d/%02d:%02d:%02d.%s' % (
+        dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, fracsec
+    )
+
+
+def mjd2date_cli (argv):
+    check_usage (mjd2date_doc, argv, usageifnoargs=True)
+
+    if len (argv) != 2:
+        wrong_usage (mjd2date_doc, 'expect exactly one argument')
+
+    print (mjd2date (float (argv[1])))
+
+
 # mstransform
 
 mstransform_doc = \
@@ -2315,6 +2500,15 @@ def plotcal_cli (argv):
     check_usage (plotcal_doc, argv, usageifnoargs=True)
     cfg = PlotcalConfig ().parse (argv[1:])
     plotcal (cfg)
+
+
+# polmodel
+#
+# Shim for a separate module
+
+def polmodel_cli (argv):
+    from .polmodel import polmodel_cli
+    polmodel_cli (argv)
 
 
 # setjy

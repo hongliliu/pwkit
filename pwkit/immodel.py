@@ -455,7 +455,7 @@ def _guess_background_point_flux (im, imdata, xmid, ymid, patchhalfsize=16):
 
 
 def fit_one_source (im, xmid, ymid, forcepoint=False,
-                    patchhalfsize=16, noise=1e-3, smallvalfactor=0.5):
+                    patchhalfsize=16, noise=1e-3, smallvalfactor=0.5, display=False):
     imdata = im.read ()
     bgguess, ptguess = _guess_background_point_flux (im, imdata, xmid, ymid,
                                                      patchhalfsize)
@@ -512,7 +512,7 @@ def fit_one_source (im, xmid, ymid, forcepoint=False,
     report ('resid_rms_mjy', '%.4f', f.residrms * 1e3)
     report ('ndof', '%d', f.soln.ndof)
     report ('ndata', '%d', f.data.size)
-    report ('nfree', '%d', f.data.size - f.soln.ndof)
+    report ('nparam', '%d', f.data.size - f.soln.ndof)
     report ('ra_sexg', '%s', fmthours (c.f_ra))
     report ('dec_sexg', '%s', fmtdeglat (c.f_dec))
     report ('x_pix', '%.1f', fx)
@@ -535,3 +535,6 @@ def fit_one_source (im, xmid, ymid, forcepoint=False,
         report ('dshape_pa_deg', '%.2f', dpa * R2D)
         report ('dshape_area_ratio', '%.3f',
                 c.f_rmajor * c.f_rminor / (im.bmaj * im.bmin))
+
+    if display:
+        f.display ()

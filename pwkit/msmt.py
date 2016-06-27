@@ -584,6 +584,12 @@ class Sampled (MeasurementABC):
         return '%.3fpm%.3f' % (datum['samples'].mean (), datum['samples'].std ())
 
 
+    def __pk_latex_u3col__ (self, **kwargs):
+        return br'\multicolumn{3}{c}{%s}' % self.__pk_latex__ (**kwargs)
+
+
+    # Math. We start with addition. It gets complicated!
+
     @classmethod
     def parse (cls, text, domain=Domain.anything):
         raise NotImplementedError () # TODO

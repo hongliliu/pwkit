@@ -1,15 +1,18 @@
 # -*- mode: python; coding: utf-8 -*-
-# Copyright 2012-2015 Peter Williams <peter@newton.cx> and collaborators.
+# Copyright 2012, 2016 Peter Williams <peter@newton.cx> and collaborators.
 # Licensed under the MIT License.
 
-"""pwkit.environments.casa.dftphotom - point-source photometry from visibilities
+# NB. This is super-redundant with msphotom but it seems impractical
+# to combine them.
+
+"""High-resolution point-source spectra from visibilities
 
 CASA doesn't yet have a task to do this.
 
 """
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-__all__ = str ('Config dftphotom dftphotom_cli').split ()
+__all__ = str ('Config dftspect dftspect_cli').split ()
 
 import six, sys, os.path, numpy as np
 from six.moves import range
@@ -21,88 +24,84 @@ from ...kwargv import ParseKeywords, Custom
 from . import util
 from .util import sanitize_unicode as b
 
-dftphotom_doc = \
+dftspect_doc = \
 """
-casatask dftphotom vis=MS [keywords...]
+casatask dftspect vis=<MS> [keywords...]
 
-Extract photometry from the visibilities in a measurement set. See the full
-documentation for some important caveats.
+Extract fluxes from the visibilities in a measurement set as a function of
+spectral window (and hence, presumably, frequency). See below the keyword docs
+for some important caveats.
 
 vis=
   Path of the MeasurementSet dataset to read. Required.
 
 out=
-  Path to which data will be written. If unspecified, data are written
-  to standard output.
+  Path to which data will be written. If unspecified, data are written to
+  standard output.
 
 rephase=RA,DEC
-  Phase the data to extract fluxes in the specified direction. If
-  unspecified, the data are not rephased, i.e. the flux at the
-  phase center is extracted. RA and DEC should be in sexigesimal
-  with fields separated by colons.
+  Phase the data to extract fluxes in the specified direction. If unspecified,
+  the data are not rephased, i.e. the flux at the phase center is extracted.
+  RA and DEC should be in sexigesimal with fields separated by colons.
 
 array=, baseline=, field=, observation=, polarization=, scan=,
 scanintent=, spw=, taql=, time=, uvdist=
-  MeasurementSet selectors used to filter the input data.
-  Default polarization is 'RR,LL'. All polarizations are averaged
-  together, so mixing parallel- and cross-hand pols is almost
-  never what you want to do.
+  MeasurementSet selectors used to filter the input data. Default polarization
+  is 'RR,LL'. All polarizations are averaged together, so mixing parallel- and
+  cross-hand pols is almost never what you want to do.
 
 datacol=
-  Name of the column to use for visibility data. Defaults to 'data'.
-  You might want it to be 'corrected_data'.
+  Name of the column to use for visibility data. Defaults to 'data'. You might
+  want it to be 'corrected_data'.
 
 datascale=
-  Multiply fluxes by this number before reporting them. Defaults to
-  1e6, so that the output is in terms of microjanskys if the data are
-  correctly flux-scaled. The textual output has two decimal places so
-  adjusting this value can give better results if your characteristic
-  fluxes are significantly different than this.
+  Multiply fluxes by this number before reporting them. Defaults to 1e6, so
+  that the output is in terms of microjanskys if the data are correctly
+  flux-scaled. The textual output has two decimal places so adjusting this
+  value can give better results if your characteristic fluxes are
+  significantly different than this.
 
 believeweights=[t|f]
-  Defaults to false, which means that we assume that the 'weight'
-  column in the dataset is NOT scaled such that the variance in the
-  visibility samples is equal to 1/weight. In this case
-  uncertainties are assessed from the scatter of all the visibilities
-  in each timeslot. If true, we trust that variance=1/weight and
-  propagate this in the standard way.
+  Defaults to false, which means that we assume that the 'weight' column in
+  the dataset is NOT scaled such that the variance in the visibility samples
+  is equal to 1/weight. In this case uncertainties are assessed from the
+  scatter of all the visibilities in each timeslot. If true, we trust that
+  variance=1/weight and propagate this in the standard way.
 
 format=[humane(default)|pandas]
-  The format of the output. The default is "humane" which is described
-  below. The "pandas" format is slightly less human-friendly but can
-  be read directly into a Pandas DataFrame with pandas.read_table ().
+  The format of the output. The default is "humane" which is described below.
+  The "pandas" format is slightly less human-friendly but can be read directly
+  into a Pandas DataFrame with pandas.read_table ().
 
-IMPORTANT: the fundamental assumption of this task is that the only
-signal in the visibilities is from a point source at the phasing
-center. We also assume that all sampled polarizations get equal
-contributions from the source (though you can resample the Stokes
-parameters on the fly, so this is not quite the same thing as
-requiring the source be unpolarized).
+IMPORTANT: the fundamental assumption of this task is that the only signal in
+the visibilities is from a point source at the phasing center. We also assume
+that all sampled polarizations get equal contributions from the source (though
+you can resample the Stokes parameters on the fly, so this is not quite the
+same thing as requiring the source be unpolarized).
 
 In the "humane" format, the output columns are:
 
-  MJD(TT) dt[min] re reErr im imErr mag magErr npts
+  freq[GHz] spw# re reErr im imErr mag magErr npts
 
-with sorted MJDs, one record for each timestamp present in the dataset,
-with all fluxes in ujy. dt is simply (MJD - MJD[0]) * 1440. The units
-of re, im, mag, and their uncertainties are microjansky by default,
-but see the datascale keyword, and there's no way to know if the
-data have actually been flux-calibrated or not.
+sorted by frequency, where the frequency is the mean frequency of its
+associated spectral window. The units of re, im, mag, and their uncertainties
+are microjansky by default, but see the datascale keyword, and there's no way
+to know if the data have actually been flux-calibrated or not.
 """
 
 class HumaneOutputFormat (object):
     def header (self, cfg):
         pass
 
-    def row (self, cfg, mjd, dtmin, r_sc, ru_sc, i_sc, iu_sc, mag, umag, n):
-        print ('%12.5f %6.2f %10.2f %10.2f %10.2f %10.2f %10.2f %10.2f %d' %
-               (mjd, dtmin, r_sc, ru_sc, i_sc, iu_sc, mag, umag, n),
+    def row (self, cfg, freq, spwnum, r_sc, ru_sc, i_sc, iu_sc, mag, umag, n):
+        print ('%10.2f %2d %10.2f %10.2f %10.2f %10.2f %10.2f %10.2f %d' %
+               (freq, spwnum, r_sc, ru_sc, i_sc, iu_sc, mag, umag, n),
                file=cfg.outstream)
 
 
 class PandasOutputFormat (object):
     def header (self, cfg):
-        print ('mjd dtmin re ure im uim abs uabs nsamp'.replace (' ', '\t'),
+        print ('freq spwnum re ure im uim abs uabs nsamp'.replace (' ', '\t'),
                file=cfg.outstream)
 
     def row (self, cfg, *args):
@@ -163,10 +162,9 @@ class Config (ParseKeywords):
     loglevel = 'warn'
 
 
-def dftphotom (cfg):
+def dftspect (cfg):
     tb = util.tools.table ()
     ms = util.tools.ms ()
-    me = util.tools.measures ()
 
     # Read stuff in. Even if the weight values don't have their
     # absolute scale set correctly, we can still use them to set the
@@ -181,7 +179,6 @@ def dftphotom (cfg):
     # axis_info.freq_axis.chan_freq is (nchan, 1) [for now?]
 
     ms.open (b(cfg.vis))
-    totrows = ms.nrow ()
     sels = dict ((n, cfg.get (n)) for n in util.msselect_keys
                  if cfg.get (n) is not None)
     ms.msselect (b(sels))
@@ -189,13 +186,23 @@ def dftphotom (cfg):
     rangeinfo = ms.range (b'data_desc_id field_id'.split ())
     ddids = rangeinfo['data_desc_id']
     fields = rangeinfo['field_id']
-    colnames = [cfg.datacol] + 'flag weight time axis_info'.split ()
+    colnames = [cfg.datacol] + 'flag weight axis_info'.split ()
     rephase = (cfg.rephase is not None)
 
     if fields.size != 1:
         # I feel comfortable making this a fatal error, even if we're
         # not rephasing.
         die ('selected data should contain precisely one field; got %d', fields.size)
+
+    tb.open (b(os.path.join (cfg.vis, 'DATA_DESCRIPTION')))
+    ddspws = tb.getcol (b'SPECTRAL_WINDOW_ID')
+    tb.close ()
+
+    tb.open (b(os.path.join (cfg.vis, 'SPECTRAL_WINDOW')))
+    spwmfreqs = np.zeros (tb.nrows ())
+    for i in xrange (spwmfreqs.size):
+        spwmfreqs[i] = tb.getcell (b'CHAN_FREQ', i).mean () * 1e-9 # -> GHz
+    tb.close ()
 
     if rephase:
         fieldid = fields[0]
@@ -220,68 +227,44 @@ def dftphotom (cfg):
         lmn = np.asarray ([l, m, n])
         colnames.append ('uvw')
 
-        # Also need this although 99% of the time `ddid` and `spwid` are the same
-        tb.open (b(os.path.join (cfg.vis, 'DATA_DESCRIPTION')))
-        ddspws = np.asarray (tb.getcol (b'SPECTRAL_WINDOW_ID'))
-        tb.close ()
-
-    tbins = {}
+    spwbins = {}
     colnames = b(colnames)
 
     for ddid in ddids:
         ms.selectinit (ddid)
         if cfg.polarization is not None:
             ms.selectpolarization (b(cfg.polarization.split (',')))
-        ms.iterinit (maxrows=4096)
+        ms.iterinit ()
         ms.iterorigin ()
+
+        spw = ddspws[ddid]
+        sdata = spwbins.get (spw)
+        if sdata is None: # might have multiple ddids going to one spw
+            sdata = spwbins[spw] = [0., 0., 0., 0., 0]
 
         while True:
             cols = ms.getdata (items=colnames)
 
             if rephase:
                 freqs = cols['axis_info']['freq_axis']['chan_freq']
-                # In CASA <= 4.5, `freqs` has shape (nchan, 1) if you've done
-                # a selectinit() on ddid. In 4.6, it has shape (nchan, nspw).
-                # So:
-                if freqs.shape[1] == 1:
-                    freqs = freqs[:,0]
-                else:
-                    freqs = freqs[:,ddspws[ddid]]
-
+                assert freqs.shape[1] == 1, 'internal inconsistency, chan_freq??'
                 # convert to m^-1 so we can multiply against UVW directly:
-                freqs *= util.INVERSE_C_MS
+                freqs = freqs[:,0] * util.INVERSE_C_MS
 
-            for i in range (cols['time'].size): # all records
-                time = cols['time'][i]
-                # get out of UTC as fast as we can! For some reason
-                # giving 'unit=s' below doesn't do what one might hope it would.
-                # CASA can convert to a variety of timescales; TAI is probably
-                # the safest conversion in terms of being helpful while remaining
-                # close to the fundamental data, but TT is possible and should
-                # be perfectly precise for standard applications.
-                mq = me.epoch (b'utc', b({'value': time / 86400., 'unit': 'd'}))
-                mjdtt = me.measure (mq, b'tt')['m0']['value']
-
-                tdata = tbins.get (mjdtt, None)
-                if tdata is None:
-                    tdata = tbins[mjdtt] = [0., 0., 0., 0., 0]
-
+            for i in xrange (cols['flag'].shape[-1]): # all records
                 if rephase:
                     uvw = cols['uvw'][:,i]
                     ph = np.exp ((0-2j) * np.pi * np.dot (lmn, uvw) * freqs)
 
-                for j in range (cols['flag'].shape[0]): # all polns
-                    # We just average together all polarizations right now!
-                    # (Not actively, but passively by just iterating over them.)
+                for j in xrange (cols['flag'].shape[0]): # all polns
                     data = cols[cfg.datacol][j,:,i]
                     flags = cols['flag'][j,:,i]
 
-                    # XXXXX casacore is currently (ca. 2012) broken and
-                    # returns the raw weights from the dataset rather than
-                    # applying the polarization selection. Fortunately all of
-                    # our weights are the same, and you can never fetch more
-                    # pol types than the dataset has, so this bit works
-                    # despite the bug.
+                    # XXXXX casacore is currently broken and returns the raw
+                    # weights from the dataset rather than applying the
+                    # polarization selection. Fortunately all of our weights
+                    # are the same, and you can never fetch more pol types
+                    # than the dataset has, so this bit works despite the bug.
 
                     w = np.where (~flags)[0]
                     if not w.size:
@@ -299,27 +282,25 @@ def dftphotom (cfg):
                     # imag^2 separately:
                     wd2 = wt * (d.real**2 + (1j) * d.imag**2)
 
-                    tdata[0] += wd
-                    tdata[1] += wd2
-                    tdata[2] += wt
-                    tdata[3] += wt**2
-                    tdata[4] += 1
+                    sdata[0] += wd
+                    sdata[1] += wd2
+                    sdata[2] += wt
+                    sdata[3] += wt**2
+                    sdata[4] += 1
 
             if not ms.iternext ():
                 break
 
     ms.close ()
 
-    # Could gain some efficiency by using a better data structure than a dict().
-    smjd = sorted (six.iterkeys (tbins))
+    spws = sorted (six.iterkeys (spwbins), key=lambda s: spwmfreqs[s])
     cfg.format.header (cfg)
 
-    for mjd in smjd:
-        wd, wd2, wt, wt2, n = tbins[mjd]
+    for spw in spws:
+        wd, wd2, wt, wt2, n = spwbins[spw]
         if n == 0:
             continue # could be all flagged
 
-        dtmin = 1440 * (mjd - smjd[0])
         r_sc = wd.real / wt * cfg.datascale
         i_sc = wd.imag / wt * cfg.datascale
         r2_sc = wd2.real / wt * cfg.datascale**2
@@ -336,11 +317,11 @@ def dftphotom (cfg):
 
         mag = np.sqrt (r_sc**2 + i_sc**2)
         umag = np.sqrt (r_sc**2 * ru_sc**2 + i_sc**2 * iu_sc**2) / mag
-        cfg.format.row (cfg, mjd, dtmin, r_sc, ru_sc, i_sc, iu_sc, mag, umag, n)
+        cfg.format.row (cfg, spwmfreqs[spw], spw, r_sc, ru_sc, i_sc, iu_sc, mag, umag, n)
 
 
-def dftphotom_cli (argv):
-    check_usage (dftphotom_doc, argv, usageifnoargs=True)
+def dftspect_cli (argv):
+    checkusage (dftspect_doc, argv, usageifnoargs=True)
     cfg = Config ().parse (argv[1:])
     util.logger (cfg.loglevel)
-    dftphotom (cfg)
+    dftspect (cfg)

@@ -1184,7 +1184,7 @@ class SimpleImage (AstroImage):
     def read (self, squeeze=False, flip=False):
         self._checkOpen ()
         data = self._handle.read (flip=flip)
-        idx = list (self._pctmpl)
+        idx = [0] * self._pctmpl.size
         idx[self._platax] = slice (None)
         idx[self._plonax] = slice (None)
         data = data[tuple (idx)]
@@ -1211,7 +1211,7 @@ class SimpleImage (AstroImage):
         self._checkWriteable ()
 
         fulldata = np.ma.empty (self._handle.shape, dtype=data.dtype)
-        idx = list (self._pctmpl)
+        idx = [0] * self._pctmpl.size
         idx[self._platax] = slice (None)
         idx[self._plonax] = slice (None)
 
@@ -1347,9 +1347,15 @@ class NaiveSubImage (AstroImage):
         raise UnsupportedError ('cannot save subimage as FITS')
 
 
-def open (path, mode):
+def open (path, mode, eat_warnings=False):
     import io
     from os.path import exists, join, isdir
+
+    if eat_warnings:
+        import warnings
+        with warnings.catch_warnings ():
+            warnings.filterwarnings ('ignore', module='astropy.*')
+            return open (path, mode, eat_warnings=False)
 
     if mode not in ('r', 'rw'):
         raise ValueError ('mode must be "r" or "rw"; got "%s"' % mode)

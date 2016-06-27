@@ -14,7 +14,7 @@ if sys.version_info[0] < 3:
 
 setup (
     name = 'pwkit',
-    version = '0.8.1.99', # also edit pwkit/__init__.py, docs/source/conf.py!
+    version = '0.8.3.99', # also edit pwkit/__init__.py, docs/source/conf.py!
 
     # This package actually *is* zip-safe, but I've run into issues with
     # installing it as a Zip: in particular, the install sometimes fails with
@@ -28,6 +28,7 @@ setup (
         'pwkit.cli',
         'pwkit.environments',
         'pwkit.environments.casa',
+        'pwkit.environments.ciao',
         'pwkit.environments.jupyter',
         'pwkit.environments.sas',
     ],

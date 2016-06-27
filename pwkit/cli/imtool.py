@@ -34,12 +34,16 @@ def load_ndshow ():
 
 class BlinkCommand (multitool.Command):
     name = 'blink'
-    argspec = '<images...>'
+    argspec = '[-f] <images...>'
     summary = 'Blink zero or more images.'
+    more_help = """
+-f  - Show the 2D FFT of the images
+
+WCS support isn't fantastic and sometimes causes crashes."""
 
     def _load (self, path, fft, maxnorm):
         try:
-            img = astimage.open (path, 'r')
+            img = astimage.open (path, 'r', eat_warnings=True)
         except Exception as e:
             die ('can\'t open path “%s”: %s', path, e)
 
@@ -109,22 +113,25 @@ class BlinkCommand (multitool.Command):
 
 class FitsrcCommand (multitool.Command):
     name = 'fitsrc'
-    argspec = '[-p] <image> <x(pixels)> <y(pixels)>'
+    argspec = '[-p] [-d] <image> <x(pixels)> <y(pixels)>'
     summary = 'Fit a compact-source model to a location in an image.'
-    more_help = """-p  - Force use of a point-source model."""
+    more_help = """-p  - Force use of a point-source model.
+-d  - Display the fit results graphically.
+"""
 
     def invoke (self, args, **kwargs):
         from ..immodel import fit_one_source
         forcepoint = pop_option ('p', args)
+        display = pop_option ('d', args)
 
         if len (args) != 3:
             raise multitool.UsageError ('expect exactly three arguments')
 
-        im = astimage.open (args[0], 'r').simple ()
+        im = astimage.open (args[0], 'r', eat_warnings=True).simple ()
         x = int (args[1])
         y = int (args[2])
 
-        fit_one_source (im, x, y, forcepoint=forcepoint)
+        fit_one_source (im, x, y, forcepoint=forcepoint, display=display)
 
 
 class HackdataCommand (multitool.Command):
@@ -139,7 +146,7 @@ class HackdataCommand (multitool.Command):
         inpath, outpath = args
 
         try:
-            with astimage.open (inpath, 'r') as imin:
+            with astimage.open (inpath, 'r', eat_warnings=True) as imin:
                 indata = imin.read ()
         except Exception as e:
             die ('cannot open input "%s": %s', inpath, e)
@@ -164,7 +171,7 @@ class InfoCommand (multitool.Command):
         from ..astutil import fmtradec, R2A, R2D
 
         try:
-            im = astimage.open (path, 'r')
+            im = astimage.open (path, 'r', eat_warnings=True)
         except Exception as e:
             die ('can\'t open "%s": %s', path, e)
 
@@ -258,7 +265,7 @@ class SetrectCommand (multitool.Command):
             raise multitool.UsageError ('could not parse one of the numeric arguments')
 
         try:
-            img = astimage.open (path, 'rw')
+            img = astimage.open (path, 'rw', eat_warnings=True)
         except Exception as e:
             die ('can\'t open path “%s”: %s', path, e)
 
@@ -269,20 +276,23 @@ class SetrectCommand (multitool.Command):
 
 class ShowCommand (multitool.Command):
     name = 'show'
-    argspec = '[--no-coords] <image> [images...]'
+    argspec = '[--no-coords] [-f] <image> [images...]'
     summary = 'Show images interactively.'
     more_help = """--no-coords - Do not show coordinates even if available
+-f          - Show the 2D FFT of the image
 
 WCS support isn't fantastic and sometimes causes crashes."""
 
     def invoke (self, args, **kwargs):
         anyfailures = False
         ndshow = load_ndshow ()
+
+        fft = pop_option ('f', args)
         no_coords = pop_option ('no-coords', args)
 
         for path in args:
             try:
-                img = astimage.open (path, 'r')
+                img = astimage.open (path, 'r', eat_warnings=True)
             except Exception as e:
                 print ('imtool show: can\'t open path “%s”: %s' % (path, e), file=sys.stderr)
                 anyfailures = True
@@ -298,6 +308,12 @@ WCS support isn't fantastic and sometimes causes crashes."""
             else:
                 data = img.read (flip=True)
                 toworld = img.toworld
+
+            if fft:
+                from numpy.fft import ifftshift, fft2, fftshift
+                data = np.abs (ifftshift (fft2 (fftshift (data.filled (0)))))
+                data = np.ma.MaskedArray (data)
+                toworld = None
 
             if no_coords:
                 toworld = None
@@ -315,7 +331,7 @@ class StatsCommand (multitool.Command):
 
     def _print (self, path):
         try:
-            img = astimage.open (path, 'r')
+            img = astimage.open (path, 'r', eat_warnings=True)
         except Exception as e:
             die ('error: can\'t open "%s": %s', path, e)
 

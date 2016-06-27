@@ -144,6 +144,9 @@ meanbp=
   bandpass solution.) This makes it easier to run automated RFI flaggers on
   the data without losing excessive numbers of edge channels.
 
+corr_to_main=false
+  If true, move the CORRECTED_DATA column to the main DATA column while gluing.
+
 loglevel=
   Logging detail level. Default is info. Options are
     severe warn info info1 info2 info3 info4 info5 debug1 debug2 debugging
@@ -167,6 +170,7 @@ class Config (ParseKeywords):
     field = [int]
     hackfield = int
     meanbp = str
+    corr_to_main = False
 
     loglevel = 'info' # XXXXXX
 
@@ -179,7 +183,7 @@ class Config (ParseKeywords):
 # empty  - column should be empty (ndim = -1)
 _spw_match_cols = frozenset ('MEAS_FREQ_REF FLAG_ROW FREQ_GROUP FREQ_GROUP_NAME '
                              'IF_CONV_CHAIN NET_SIDEBAND BBC_NO'.split ())
-_spw_first_cols = frozenset ('REF_FREQUENCY NAME'.split ())
+_spw_first_cols = frozenset ('DOPPLER_ID REF_FREQUENCY NAME'.split ())
 _spw_scsum_cols = frozenset ('NUM_CHAN TOTAL_BANDWIDTH'.split ())
 _spw_concat_cols = frozenset ('CHAN_FREQ CHAN_WIDTH EFFECTIVE_BW RESOLUTION'.split ())
 _spw_empty_cols = frozenset ('ASSOC_SPW_ID ASSOC_NATURE'.split ())
@@ -223,11 +227,11 @@ _vis_smatch_cols = frozenset ('EXPOSURE FEED1 FEED2 INTERVAL '
                               'STATE_ID TIME_CENTROID'.split ())
 _vis_vmatch_cols = frozenset ('UVW WEIGHT SIGMA'.split ())
 _vis_or_cols = frozenset ('FLAG_ROW'.split ())
-_vis_pconcat_cols = frozenset ('FLAG DATA MODEL_DATA CORRECTED_DATA'.split ())
+_vis_pconcat_cols = frozenset ('FLAG DATA MODEL_DATA CORRECTED_DATA WEIGHT_SPECTRUM'.split ())
 _vis_data_cols = frozenset ('DATA MODEL_DATA CORRECTED_DATA'.split ())
-_vis_empty_cols = frozenset ('FLAG_CATEGORY WEIGHT_SPECTRUM'.split ())
+_vis_empty_cols = frozenset ('FLAG_CATEGORY'.split ())
 _vis_pconcat_dtypes = {'FLAG': np.bool, 'DATA': np.complex128, 'MODEL_DATA': np.complex128,
-                       'CORRECTED_DATA': np.complex128}
+                       'CORRECTED_DATA': np.complex128, 'WEIGHT_SPECTRUM': np.float64}
 
 _np_converters = {
     np.bool_: bool,
@@ -438,6 +442,10 @@ def _spwglue (cfg, prog, thisout, thisfield, nfields, fieldidx):
 
     dt = util.tools.table ()
     dt.open (b(thisout), nomodify=False)
+
+    if cfg.corr_to_main:
+        dt.removecols ([b'CORRECTED_DATA'])
+
     outrow = 0
 
     for outspw in range (nout):
@@ -480,7 +488,16 @@ def _spwglue (cfg, prog, thisout, thisfield, nfields, fieldidx):
                 if invsqmeanbp is not None and col in _vis_data_cols:
                     v *= invsqmeanbp
 
-                dt.putcell (b(col), outrow, v)
+                if not cfg.corr_to_main:
+                    dt.putcell (b(col), outrow, v)
+                elif col == 'DATA':
+                    pass # ignore; will be overwritten by CORRECTED_DATA
+                else:
+                    if col == 'CORRECTED_DATA':
+                        outcol = 'DATA'
+                    else:
+                        outcol = col
+                    dt.putcell (b(outcol), outrow, v)
 
                 if isinstance (v, np.ndarray):
                     v.fill (0)

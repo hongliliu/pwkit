@@ -5,16 +5,22 @@
 Basic astronomical calculations (:mod:`pwkit.astutil`)
 ========================================================================
 
-.. module:: pwkit.astutil
+.. automodule:: pwkit.astutil
    :synopsis: basic astronomical utilities
 
-This module collects many utilities for performing basic astronomical calculations, including:
+.. currentmodule:: pwkit.astutil
+
+This topics covered in this module are:
 
  - :ref:`useful-constants`
  - :ref:`sexagesimal`
  - :ref:`angles`
  - :ref:`gaussians`
  - :ref:`astrometry`
+ - :ref:`misc-astronomy`
+
+Angles are **always** measured in radians, whereas some other astronomical
+codebases prefer degrees.
 
 
 .. _useful-constants:
@@ -22,53 +28,46 @@ This module collects many utilities for performing basic astronomical calculatio
 Useful Constants
 ------------------------------------------------------------------------------
 
-.. data:: pi
+The following useful constants are provided:
 
-   Placeholder.
+``pi``
+  Mathematical π.
+``twopi``
+  Mathematical 2π.
+``halfpi``
+  Mathematical π/2.
+``R2A``
+  A constant for converting radians to arcseconds by multiplication::
 
-.. data:: twopi
+    arcsec = radians * astutil.R2A
 
-   Placeholder.
+  Equal to ``3600 * 180 / pi`` or about 206265.
+``A2R``
+  A constant for converting arcseconds to radians by multiplication::
 
-.. data:: halfpi
+    radians = arcsec * astutil.A2R
 
-   Placeholder.
+``R2D``
+  Analogous to ``R2A``: a constant for converting radians to degrees
+``D2R``
+  Analogous to ``A2R``: a constant for converting degrees to radians
+``R2H``
+  Analogous to ``R2A``: a constant for converting radians to hours
+``H2R``
+  Analogous to ``A2R``: a constant for converting hours to radians
+``F2S``
+  A constant for converting a Gaussian FWHM (full width at half maximum) to
+  a standard deviation (σ) value by multiplication::
 
-.. data:: R2A
+    sigma = fwhm * astutil.F2S
 
-   Placeholder.
-
-.. data:: A2R
-
-   Placeholder.
-
-.. data:: R2D
-
-   Placeholder.
-
-.. data:: D2R
-
-   Placeholder.
-
-.. data:: R2H
-
-   Placeholder.
-
-.. data:: H2R
-
-   Placeholder.
-
-.. data:: F2S
-
-   Placeholder.
-
-.. data:: S2F
-
-   Placeholder.
-
-.. data:: J2000
-
-   Placeholder.
+  Equal to ``(8 * ln(2))**-0.5`` or about 0.425.
+``S2F``
+  A constant for converting a Gaussian standard deviation (σ) value to a
+  FWHM (full width at half maximum) by multiplication.
+``J2000``
+  The astronomical J2000.0 epoch as a MJD (modified Julian Date). Precisely
+  equal to 51544.5.
 
 
 .. _sexagesimal:
@@ -76,33 +75,22 @@ Useful Constants
 Sexagesimal Notation
 ------------------------------------------------------------------------------
 
-.. function:: fmthours (radians, norm='wrap', precision=3, seps='::')
+.. autosummary::
+   fmthours
+   fmtdeglon
+   fmtdeglat
+   fmtradec
+   parsehours
+   parsedeglat
+   parsedeglon
 
-   Placeholder.
-
-.. function:: fmtdeglon (radians, norm='wrap', precision=2, seps='::')
-
-   Placeholder.
-
-.. function:: fmtdeglat (radians, norm='raise', precision=2, seps='::')
-
-   Placeholder.
-
-.. function:: fmtradec (rarad, decrad, precision=2, raseps='::', decseps='::', intersep=' ')
-
-   Placeholder.
-
-.. function:: parsehours (hrstr)
-
-   Placeholder.
-
-.. function:: parsedeglat (latstr)
-
-   Placeholder.
-
-.. function:: parsedeglon (lonstr)
-
-   Placeholder.
+.. autofunction:: fmthours
+.. autofunction:: fmtdeglon
+.. autofunction:: fmtdeglat
+.. autofunction:: fmtradec
+.. autofunction:: parsehours
+.. autofunction:: parsedeglat
+.. autofunction:: parsedeglon
 
 
 .. _angles:
@@ -110,29 +98,36 @@ Sexagesimal Notation
 Working with Angles
 ------------------------------------------------------------------------------
 
-.. function:: angcen (a)
+.. autosummary::
+   angcen
+   orientcen
+   sphdist
+   sphbear
+   sphofs
+   parang
 
-   Placeholder.
+.. function:: angcen(a)
 
-.. function:: orientcen (a)
+   “Center” an angle *a* to be between -π and +π.
 
-   Placeholder.
+   This is done by adding or subtracting multiples of 2π as necessary. Both
+   *a* and the return value are in radians. The argument may be a vector.
 
-.. function:: sphdist (lat1, lon1, lat2, lon2)
+.. function:: orientcen(a)
 
-   Placeholder.
+   “Center” an orientation *a* to be between -π/2 and +π/2.
 
-.. function:: sphbear (lat1, lon1, lat2, lon2, tol=1e-15)
+   This is done by adding or subtract multiples of π as necessary. Both *a*
+   and the return value are in radians. The argument may be a vector.
 
-   Placeholder.
+   An “orientation” is different than an angle because values that differ by
+   just π, not 2π, are considered equivalent. Orientations can come up in the
+   discussion of linear polarization, for example.
 
-.. function:: sphofs (lat1, lon1, r, pa, tol=1e-2, rmax=None)
-
-   Placeholder.
-
-.. function:: parang (hourangle, declination, latitude)
-
-   Placeholder.
+.. autofunction:: sphdist
+.. autofunction:: sphbear
+.. autofunction:: sphofs
+.. autofunction:: parang
 
 
 .. _gaussians:
@@ -140,13 +135,8 @@ Working with Angles
 Simple Operations on 2D Gaussians
 ------------------------------------------------------------------------------
 
-.. function:: gaussian_convolve (maj1, min1, pa1, maj2, min2, pa2)
-
-   Placeholder.
-
-.. function:: gaussian_deconvolve (smaj, smin, spa, bmaj, bmin, bpa)
-
-   Placeholder.
+.. autofunction:: gaussian_convolve
+.. autofunction:: gaussian_deconvolve
 
 
 .. _astrometry:
@@ -154,30 +144,86 @@ Simple Operations on 2D Gaussians
 Basic Astrometry
 ------------------------------------------------------------------------------
 
-.. function:: get_2mass_epoch (tmra, tmdec, debug=False)
+The :class:`AstrometryInfo` class can be used to perform basic astrometric
+calculations that are nonetheless fairly accurate.
 
-   Placeholder.
+.. autoclass:: AstrometryInfo
 
-.. function:: get_simbad_astrometry_info (ident, items=..., debug=False)
+   The attributes encoding the astrometric data are as follows. Values of
+   ``None`` will be treated as unknown. Most of this information can be
+   automatically filled in from the :meth:`fill_from_simbad` function, if you
+   trust Simbad.
 
-   Placeholder.
+   .. autosummary::
+      ra
+      dec
+      pos_u_maj
+      pos_u_min
+      pos_u_pa
+      pos_epoch
+      promo_ra
+      promo_dec
+      promo_u_maj
+      promo_u_min
+      promo_u_pa
+      parallax
+      u_parallax
+      vradial
+      u_vradial
 
-.. class:: AstrometryInfo (simbadident=None, **kwargs)
+   Methods are:
 
-   Placeholder.
+   .. autosummary::
+      verify
+      predict
+      print_prediction
+      fill_from_simbad
+      fill_from_allwise
 
-.. method:: AstrometryInfo.verify (complain=True)
+   The stringification of an :class:`AstrometryInfo` class formats its fields
+   in a human-readable, multiline format that uses Unicode characters.
 
-   Placeholder.
+.. autoattribute:: AstrometryInfo.ra
+.. autoattribute:: AstrometryInfo.dec
+.. autoattribute:: AstrometryInfo.pos_u_maj
+.. autoattribute:: AstrometryInfo.pos_u_min
+.. autoattribute:: AstrometryInfo.pos_u_pa
+.. autoattribute:: AstrometryInfo.pos_epoch
+.. autoattribute:: AstrometryInfo.promo_ra
+.. autoattribute:: AstrometryInfo.promo_dec
+.. autoattribute:: AstrometryInfo.promo_u_maj
+.. autoattribute:: AstrometryInfo.promo_u_min
+.. autoattribute:: AstrometryInfo.promo_u_pa
+.. autoattribute:: AstrometryInfo.parallax
+.. autoattribute:: AstrometryInfo.u_parallax
+.. autoattribute:: AstrometryInfo.vradial
+.. autoattribute:: AstrometryInfo.u_vradial
+.. automethod:: AstrometryInfo.verify
+.. automethod:: AstrometryInfo.predict
+.. automethod:: AstrometryInfo.print_prediction
+.. automethod:: AstrometryInfo.fill_from_simbad
+.. automethod:: AstrometryInfo.fill_from_allwise
 
-.. method:: AstrometryInfo.predict (mjd, complain=True, n=20000)
+A few helper functions may also be of interest:
 
-   Placeholder.
+.. autosummary::
+   get_2mass_epoch
+   get_simbad_astrometry_info
 
-.. method:: AstrometryInfo.prin_prediction (ptup)
+.. autofunction:: get_2mass_epoch
+.. autofunction:: get_simbad_astrometry_info
 
-   Placeholder.
 
-.. method:: AstrometryInfo.fill_from_simbad (ident, debug=False)
+.. _misc-astronomy:
 
-   Placeholder.
+Miscellaneous Astronomical Computations
+------------------------------------------------------------------------------
+
+These functions don’t fit under the other rubrics very well.
+
+.. autosummary::
+   abs2app
+   app2abs
+
+.. autofunction:: abs2app
+.. autofunction:: app2abs

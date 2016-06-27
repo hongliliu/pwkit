@@ -82,31 +82,11 @@ class _Broadcaster (method_decorator):
 
 
 class _BroadcasterDecorator (object):
-    """Decorator to make functions automatically work on vectorized arguments.
-
-    @broadcastize (3) # myfunc's first 3 arguments should be arrays.
-    def myfunc (arr1, arr2, arr3, non_vec_arg1, non_vec_arg2):
-        ...
-
-    This decorator makes it so that the child function's arguments are assured
-    to be Numpy arrays of at least 1 dimension, and all having the same shape.
-    The child can then perform vectorized computations without having to
-    special-case scalar-vs.-vector possibilities or worry about manual
-    broadcasting. If the inputs to the function are indeed all scalars, the output
-    is converted back to scalar upon return.
-
-    Therefore, for the caller, the function appears to have magic broadcasting
-    rules equivalent to a Numpy ufunc. Meanwhile the implementer can get
-    broadcasting behavior without having to special case the actual inputs.
+    """Decorator to make functions automatically work on vectorized arguments. See
+    the pwkit documentation for usage information.
 
     """
     def __init__ (self, n_arr, ret_spec=0, force_float=True):
-        """Decorator for making a auto-broadcasting function. Arguments:
-
-        n_arr - The number of array arguments accepted by the decorated function.
-                These arguments come at the beginning of the argument list.
-
-        """
         self._n_arr = int (n_arr)
         if self._n_arr < 1:
             raise ValueError ('broadcastiz\'ed function must take at least 1 '
@@ -341,27 +321,35 @@ def reduce_data_frame (df, chunk_slicers,
                        nchunk_colname='nchunk',
                        uncert_prefix='u',
                        min_points_per_chunk=3):
-    """"Reduce" a DataFrame by collapsing rows in grouped chunks.
+    """"Reduce" a DataFrame by collapsing rows in grouped chunks. Returns another
+    DataFrame with similar columns but fewer rows.
 
-    Returns another DataFrame with similar columns but fewer rows. Arguments
-    are:
+    Arguments:
 
-    *df*
-      A :class:`pandas.DataFrame`.
-    *chunk_slicers*
+    df
+      The input :class:`pandas.DataFrame`.
+    chunk_slicers
       An iterable that returns values that are used to slice *df* with its
-      :meth:`~pandas.DataFrame.iloc` method. An example value might be the
+      :meth:`pandas.DataFrame.iloc` indexer. An example value might be the
       generator returned from :func:`slice_evenly_with_gaps`.
-    *avg_cols*
-      A tuple of names of columns that will be reduced by taking the mean of
-      adjacent rows.
-    *uavg_cols*
-      A tuple of names of columns that will be reduced by taking a weighted
-      mean of adjacent rows, with the uncertainty of each column coming
-      from prefixing the column name with *uncert_prefix*.
-    *minmax_cols*
-      A tuple of names of columns that will be reduced by reporting the
-      minimum and maximum values achieved in each chunk
+    avg_cols
+      An iterable of names of columns that are to be reduced by taking the mean.
+    uavg_cols
+      An iterable of names of columns that are to be reduced by taking a
+      weighted mean.
+    minmax_cols
+      An iterable of names of columns that are to be reduced by reporting minimum
+      and maximum values.
+    nchunk_colname
+      The name of a column to create reporting the number of rows contributing
+      to each chunk.
+    uncert_prefix
+      The column name prefix for locating uncertainty estimates. By default, the
+      uncertainty on the column ``"temp"`` is given in the column ``"utemp"``.
+    min_points_per_chunk
+      Require at least this many rows in each chunk. Smaller chunks are discarded.
+
+    Returns a new :class:`pandas.DataFrame`.
 
     """
     subds = [df.iloc[idx] for idx in chunk_slicers]
@@ -395,6 +383,13 @@ def reduce_data_frame (df, chunk_slicers,
 
 
 def reduce_data_frame_evenly_with_gaps (df, valcol, target_len, maxgap, **kwargs):
+    """"Reduce" a DataFrame by collapsing rows in grouped chunks, grouping based on
+    gaps in one of the columns.
+
+    This function combines :func:`reduce_data_frame` with
+    :func:`slice_evenly_with_gaps`.
+
+    """
     return reduce_data_frame (df,
                               slice_evenly_with_gaps (df[valcol], target_len, maxgap),
                               **kwargs)
@@ -404,20 +399,22 @@ def reduce_data_frame_evenly_with_gaps (df, valcol, target_len, maxgap, **kwargs
 
 def usmooth (window, uncerts, *data, **kwargs):
     """Smooth data series according to a window, weighting based on uncertainties.
+
     Arguments:
 
-    *window*
-      The window.
-    *uncerts*
+    window
+      The smoothing window.
+    uncerts
       An array of uncertainties used to weight the smoothing.
-    ``*data``
-      The data series, same size as `uncerts`
-    *k* (default ``None``)
-      Only keep every *k*th point of the results; if *k* is ``None``, it is
-      set to ``window.size``.
+    data
+      One or more data series, of the same size as *uncerts*.
+    k = None
+      If specified, only every *k*-th point of the results will be kept. If k
+      is None (the default), it is set to ``window.size``, i.e. correlated
+      points will be discarded.
 
-    Returns: ``(s_uncerts, s_data[0], s_data[1], ...)`` - the smoothed uncertainties
-    and data series.
+    Returns: ``(s_uncerts, s_data[0], s_data[1], ...)``, the smoothed
+    uncertainties and data series.
 
     Example::
 
@@ -458,19 +455,22 @@ def usmooth (window, uncerts, *data, **kwargs):
 
 
 def dfsmooth (window, df, ucol, k=None):
-    """Smooth a Pandas DataFrame according to a window, weighting based on
-    uncertainties. Arguments:
+    """Smooth a :class:`pandas.DataFrame` according to a window, weighting based on
+    uncertainties.
 
-    *window*
-      The window.
-    *df*
+    Arguments are:
+
+    window
+      The smoothing window.
+    df
       The :class:`pandas.DataFrame`.
-    *ucol*
-      The name of the column in *df* that contains the uncertainties
-      to weight by.
-    *k* (default ``None``)
-      Only keep every *k*th point of the results. If *k* is ``None``,
-      it is set to ``window.size``.
+    ucol
+      The name of the column in *df* that contains the uncertainties to weight
+      by.
+    k = None
+      If specified, only every *k*-th point of the results will be kept. If k
+      is None (the default), it is set to ``window.size``, i.e. correlated
+      points will be discarded.
 
     Returns: a smoothed data frame.
 
@@ -513,27 +513,27 @@ def parallel_newton (func, x0, fprime=None, par_args=(), simple_args=(), tol=1.4
 
     Arguments:
 
-    *func*
-      The function to search for zeros, called as ``f(x, [*par_args...], [*simple_args...])``
-    *x0*
+    func
+      The function to search for zeros, called as ``f(x, [*par_args...], [*simple_args...])``.
+    x0
       The initial point for the zero search.
-    *fprime* (default ``None``)
-      The first derivative of *func*, called the same way, or ``None``.
-    *par_args* (default ``()``)
+    fprime
+      (Optional) The first derivative of *func*, called the same way.
+    par_args
       Tuple of additional parallelized arguments.
-    *simple_args* (default ``()``)
+    simple_args
       Tuple of additional arguments passed identically to every invocation.
-    *tol* (default ``1.48e-8``)
+    tol
       The allowable error of the zero value.
-    *maxiter* (default 50)
+    maxiter
       Maximum number of iterations.
-    *parallel* (default ``True``)
+    parallel
       Controls parallelization; default uses all available cores. See
       :func:`pwkit.parallel.make_parallel_helper`.
-    ``**kwargs``
+    kwargs
       Passed to :func:`scipy.optimize.newton`.
 
-    Returns: locations of zeros.
+    Returns: an array of locations of zeros.
 
     Finds zeros in parallel. The values *x0*, *tol*, *maxiter*, and the items
     of *par_args* should all be numeric, and may be N-dimensional Numpy
@@ -547,12 +547,12 @@ def parallel_newton (func, x0, fprime=None, par_args=(), simple_args=(), tol=1.4
 
     Example::
 
-        >>> parallel_newton (lambda x, a: x - 2 * a, 2, par_args=(np.arange (6),))
-        <<< array([  0.,   2.,   4.,   6.,   8.,  10.])
-
-        >>> parallel_newton (lambda x: np.sin (x), np.arange (6))
-        <<< array([  0.00000000e+00,   3.65526589e-26,   3.14159265e+00,
-                     3.14159265e+00,   3.14159265e+00,   6.28318531e+00])
+       >>> parallel_newton (lambda x, a: x - 2 * a, 2,
+                            par_args=(np.arange (6),))
+       <<< array([  0.,   2.,   4.,   6.,   8.,  10.])
+       >>> parallel_newton (lambda x: np.sin (x), np.arange (6))
+       <<< array([  0.00000000e+00,   3.65526589e-26,   3.14159265e+00,
+                    3.14159265e+00,   3.14159265e+00,   6.28318531e+00])
 
     """
     from scipy.optimize import newton
@@ -590,26 +590,25 @@ def parallel_newton (func, x0, fprime=None, par_args=(), simple_args=(), tol=1.4
 def parallel_quad (func, a, b, par_args=(), simple_args=(), parallel=True, **kwargs):
     """A parallelized version of :func:`scipy.integrate.quad`.
 
-    Arguments:
+    Arguments are:
 
-    *func*
-      The function to integrate, called as ``f(x, [*par_args...], [*simple_args...])``
-    *a*
+    func
+      The function to integrate, called as ``f(x, [*par_args...], [*simple_args...])``.
+    a
       The lower limit(s) of integration.
-    *b*
+    b
       The upper limits(s) of integration.
-    *par_args*
+    par_args
       Tuple of additional parallelized arguments.
-    *simple_args*
+    simple_args
       Tuple of additional arguments passed identically to every invocation.
-    *parallel*
+    parallel
       Controls parallelization; default uses all available cores. See
       :func:`pwkit.parallel.make_parallel_helper`.
-    ``**kwargs``
-      Passed to :func:`scipy.integrate.quad`. Don't set ``full_output`` to
-      ``True``.
+    kwargs
+      Passed to :func:`scipy.integrate.quad`. Don't set *full_output* to True.
 
-    Returns: integrals and errors, see below.
+    Returns: integrals and errors; see below.
 
     Computes many integrals in parallel. The values *a*, *b*, and the items of
     *par_args* should all be numeric, and may be N-dimensional Numpy arrays.
@@ -625,13 +624,13 @@ def parallel_quad (func, a, b, par_args=(), simple_args=(), parallel=True, **kwa
 
     Example::
 
-        parallel_quad (lambda x, u, v, q: u * x + v,
-                       0, # a
-                       [3, 4], # b
-                       (np.arange (6).reshape ((3,2)), np.arange (3).reshape ((3,1))), # par_args
-                       ('hello',),)
+      >>> parallel_quad (lambda x, u, v, q: u * x + v,
+                         0, # a
+                         [3, 4], # b
+                         (np.arange (6).reshape ((3,2)), np.arange (3).reshape ((3,1))), # par_args
+                         ('hello',),)
 
-    Computes six integrals and returns an array of shape (2,3,2). The
+    Computes six integrals and returns an array of shape ``(2,3,2)``. The
     functions that are evaluated are::
 
       [[ 0*x + 0, 1*x + 0 ],
@@ -698,9 +697,9 @@ def weighted_mean (values, uncerts, **kwargs):
 
 def weighted_mean_df (df, **kwargs):
     """The same as :func:`weighted_mean`, except the argument is expected to be a
-    two-column :class:`pandas.DataFrame` whose first column gives the data
-    values and second column gives their uncertainties. Returns
-    ``(weighted_mean, uncertainty_in_mean)``.
+   two-column :class:`pandas.DataFrame` whose first column gives the data
+   values and second column gives their uncertainties. Returns
+   ``(weighted_mean, uncertainty_in_mean)``.
 
     """
     return weighted_mean (df[df.columns[0]], df[df.columns[1]], **kwargs)

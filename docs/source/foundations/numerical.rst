@@ -10,72 +10,19 @@ Numerical utilities (:mod:`pwkit.numutil`)
 
 .. currentmodule:: pwkit.numutil
 
+The functionality in this module can be grouped into these categories:
 
-Summary
--------
-
-:ref:`array-helpers`
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autosummary::
-
-   broadcastize
-   try_asarray
-
-:ref:`statistics`
-~~~~~~~~~~~~~~~~~
-
-.. autosummary::
-
-   rms
-   weighted_mean
-   weighted_mean_df
-   weighted_variance
-   usmooth
-
-:ref:`dataframes`
-~~~~~~~~~~~~~~~~~
-
-.. autosummary::
-
-   reduce_data_frame
-   reduce_data_frame_evenly_with_gaps
-   slice_around_gaps
-   slice_evenly_with_gaps
-   dfsmooth
-   fits_recarray_to_data_frame
-   data_frame_to_astropy_table
-   page_data_frame
-
-:ref:`parallelized`
-~~~~~~~~~~~~~~~~~~~
-
-.. autosummary::
-
-   parallel_newton
-   parallel_quad
-
-:ref:`tophats-and-steps`
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autosummary::
-
-   unit_tophat_ee
-   unit_tophat_ie
-   unit_tophat_ei
-   unit_tophat_ii
-   make_tophat_ee
-   make_tophat_ei
-   make_tophat_ie
-   make_tophat_ii
-   make_step_lcont
-   make_step_rcont
+ - :ref:`auto-broadcasting`
+ - :ref:`statistics`
+ - :ref:`dataframes`
+ - :ref:`parallelized`
+ - :ref:`tophats-and-steps`
 
 
-.. _array-helpers:
+.. _auto-broadcasting:
 
-Helpers for dealing with Numpy arrays
--------------------------------------
+Making functions that auto-broadcast their arguments
+------------------------------------------------------------------------------
 
 .. decorator:: broadcastize(n_arr, ret_spec=0, force_float=True)
 
@@ -138,23 +85,22 @@ Helpers for dealing with Numpy arrays
 	 higher_vector = [x, y, z]
 	 return z, higher_vector, 'hello'
 
-.. autofunction:: try_asarray
-
 
 .. _statistics:
 
 Convenience functions for statistics
 ------------------------------------------------------------------------------
 
-.. autofunction:: rms(x)
+.. autosummary::
+   rms
+   weighted_mean
+   weighted_mean_df
+   weighted_variance
 
+.. autofunction:: rms
 .. autofunction:: weighted_mean
-
 .. autofunction:: weighted_mean_df
-
 .. autofunction:: weighted_variance
-
-.. autofunction:: usmooth
 
 
 .. _dataframes:
@@ -162,20 +108,25 @@ Convenience functions for statistics
 Convenience functions for :class:`pandas.DataFrame` objects
 ------------------------------------------------------------------------------
 
+.. autosummary::
+   reduce_data_frame
+   reduce_data_frame_evenly_with_gaps
+   slice_around_gaps
+   slice_evenly_with_gaps
+   dfsmooth
+   fits_recarray_to_data_frame
+   data_frame_to_astropy_table
+   usmooth
+   page_data_frame
+
 .. autofunction:: reduce_data_frame
-
 .. autofunction:: reduce_data_frame_evenly_with_gaps
-
 .. autofunction:: slice_around_gaps
-
 .. autofunction:: slice_evenly_with_gaps
-
 .. autofunction:: dfsmooth
-
 .. autofunction:: fits_recarray_to_data_frame
-
 .. autofunction:: data_frame_to_astropy_table
-
+.. autofunction:: usmooth
 .. autofunction:: page_data_frame
 
 
@@ -184,32 +135,38 @@ Convenience functions for :class:`pandas.DataFrame` objects
 Parallelized versions of simple math algorithms
 ------------------------------------------------------------------------------
 
-.. autofunction:: parallel_newton
+.. autosummary::
+   parallel_newton
+   parallel_quad
 
+.. autofunction:: parallel_newton
 .. autofunction:: parallel_quad
 
 
 .. _tophats-and-steps:
 
-Tophat and Step Functions
+Tophat and step functions
 ------------------------------------------------------------------------------
 
+.. autosummary::
+   unit_tophat_ee
+   unit_tophat_ei
+   unit_tophat_ie
+   unit_tophat_ii
+   make_tophat_ee
+   make_tophat_ei
+   make_tophat_ie
+   make_tophat_ii
+   make_step_lcont
+   make_step_rcont
+
 .. autofunction:: unit_tophat_ee
-
 .. autofunction:: unit_tophat_ei
-
 .. autofunction:: unit_tophat_ie
-
 .. autofunction:: unit_tophat_ii
-
 .. autofunction:: make_tophat_ee
-
 .. autofunction:: make_tophat_ei
-
 .. autofunction:: make_tophat_ie
-
 .. autofunction:: make_tophat_ii
-
 .. autofunction:: make_step_lcont
-
 .. autofunction:: make_step_rcont
