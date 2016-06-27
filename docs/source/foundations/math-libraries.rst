@@ -37,7 +37,7 @@ unique to ``pkwit``, though.
 `arctanh`         Compute inverse hyperbolic tangent.
 `bitwise_and`     Compute bitwise AND; integer types only.
 `bitwise_or`      Compute bitwise OR; integer types only.
-`bitwise_xor`     Compute bitwise XOR; integer types only.
+`bitwise_xor`     Compute bitwise XOR (“exclusive or”); integer types only.
 `broadcast_to`    Return a view of the input with a new array shape.
 `cbrt`            Compute cube root.
 `ceil`            Compute ceiling.
@@ -82,7 +82,7 @@ unique to ``pkwit``, though.
 `logical_and`     Compute the logical AND.
 `logical_or`      Compute the logical OR.
 `logical_not`     Compute the logical NOT.
-`logical_xor`     Compute the logical XOR.
+`logical_xor`     Compute the logical XOR (“exclusive or”).
 `maximum`         Compute elementwise maximum; NaNs propagate (contra `fmax`)
 `minimum`         Compute elementwise minimum; NaNs propagate (contra `fmin`)
 `modf`            Separate numbers into fractional and integral parts.
@@ -266,7 +266,7 @@ Individual function reference for the Common Interface
 
 .. function:: bitwise_xor(x, y, out=None)
 
-   Compute bitwise XOR; integer types only.
+   Compute bitwise XOR (“exclusive or”); integer types only.
 
 .. function:: broadcast_to(x, shape)
 
@@ -351,7 +351,7 @@ Individual function reference for the Common Interface
 
 .. function:: floor(x, out=None)
 
-   Compute floor;
+   Compute floor.
 
 .. function:: floor_divide(x, y, out=None)
 
@@ -461,7 +461,7 @@ Individual function reference for the Common Interface
 
 .. function:: logical_xor(x, y, out=None)
 
-   Compute the logical XOR.
+   Compute the logical XOR (“exclusive or”).
 
 .. function:: maximum(x, y, out=None)
 
