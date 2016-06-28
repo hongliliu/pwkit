@@ -682,6 +682,7 @@ class TidiedFunctionLibrary (MathFunctionLibrary):
             zerod = (xsh == ())
             if zerod:
                 x = self.reshape (x, (1,))
+                xsh = (1,)
 
             flags = common_interface_functions[opname].flags
             if flags & Flags.bool_result:
@@ -724,6 +725,7 @@ class TidiedFunctionLibrary (MathFunctionLibrary):
             if zerod:
                 x = self.reshape (x, (1,))
                 y = self.reshape (y, (1,))
+                bsh = (1,)
             else:
                 if xsh != bsh:
                     x = self.broadcast_to (x, bsh)
@@ -745,7 +747,8 @@ class TidiedFunctionLibrary (MathFunctionLibrary):
             osh = self.shape (out)
             bsh = broadcast_shapes (xsh, ysh, osh)
             if osh != bsh:
-                raise ValueError ('output parameter must have final broadcasted shape')
+                raise ValueError ('output parameter must have final broadcasted shape [%r %r %r %r]'
+                                  % (xsh, ysh, osh, bsh))
 
             zerod = (bsh == ())
 
